@@ -33,25 +33,49 @@ async function postForm(form) {
   return data;
 }
 
-function moveExcuse(form) {
-  const row = form.closest("li");
+function paintExcuse(form) {
   const flag = form.querySelector('[name="excused"]');
   const button = form.querySelector("button");
-  const problems = document.querySelector("#problems");
-  const excused = document.querySelector("#excused");
-  const empty = document.querySelector("#problems-empty");
-  const heading = document.querySelector("#excused-heading");
-  if (flag.value === "1") {
-    flag.value = "0";
-    button.textContent = "Count it again";
-    excused.appendChild(row);
-  } else {
-    flag.value = "1";
-    button.textContent = "Excuse";
-    problems.appendChild(row);
-  }
-  empty.hidden = problems.children.length > 0;
-  heading.hidden = excused.children.length === 0;
+  const on = flag.value === "0";
+  button.classList.toggle("is-on", on);
+  button.setAttribute("aria-pressed", on ? "true" : "false");
+}
+
+function moveExcuse(form) {
+  const flag = form.querySelector('[name="excused"]');
+  flag.value = flag.value === "1" ? "0" : "1";
+  paintExcuse(form);
+}
+
+let courseFilter = "";
+let worriesOnly = false;
+
+function courseName(node) {
+  const label = node.querySelector(".course");
+  return (label ? label.textContent : node.getAttribute("data-course") || "").replace(/\s+/g, " ").trim();
+}
+
+function applyAssignmentFilters() {
+  const list = document.querySelector("#assignments");
+  if (!list) return;
+  list.classList.toggle("quiet", worriesOnly);
+  const rows = list.querySelectorAll(":scope > li");
+  let shown = 0;
+  rows.forEach((row) => {
+    const courseOk = !courseFilter || courseName(row) === courseFilter;
+    const ungraded = row.getAttribute("data-ungraded") === "1";
+    const worryOk = !worriesOnly || (row.getAttribute("data-counts") === "1" && !ungraded);
+    const visible = courseOk && worryOk;
+    row.hidden = !visible;
+    if (visible) shown += 1;
+  });
+  const empty = document.querySelector("#assignments-empty");
+  if (empty) empty.hidden = shown > 0;
+  document.querySelectorAll(".course-filter").forEach((card) => {
+    const on = courseName(card) === courseFilter && courseFilter !== "";
+    card.classList.toggle("is-selected", on);
+    card.setAttribute("aria-pressed", on ? "true" : "false");
+  });
 }
 
 document.querySelectorAll("form[data-live='excuse']").forEach((form) => {
@@ -67,6 +91,38 @@ document.querySelectorAll("form[data-live='excuse']").forEach((form) => {
       flash(error.message, true);
     } finally {
       button.disabled = false;
+    }
+  });
+});
+
+document.querySelectorAll(".course-filter").forEach((card) => {
+  card.addEventListener("click", () => {
+    const name = courseName(card);
+    courseFilter = courseFilter === name ? "" : name;
+    applyAssignmentFilters();
+  });
+});
+
+const onlyCounts = document.querySelector("#only-counts");
+if (onlyCounts) {
+  onlyCounts.addEventListener("click", () => {
+    worriesOnly = !worriesOnly;
+    onlyCounts.classList.toggle("is-on", worriesOnly);
+    onlyCounts.setAttribute("aria-pressed", worriesOnly ? "true" : "false");
+    applyAssignmentFilters();
+  });
+}
+
+document.querySelectorAll("form[data-live='setting']").forEach((form) => {
+  form.addEventListener("change", async () => {
+    form.classList.add("saving");
+    try {
+      await postForm(form);
+      flash("Saved");
+    } catch (error) {
+      flash(error.message, true);
+    } finally {
+      form.classList.remove("saving");
     }
   });
 });

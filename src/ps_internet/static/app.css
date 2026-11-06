@@ -45,15 +45,7 @@ body {
   letter-spacing: 0.02em;
 }
 
-nav a, button.link {
-  color: var(--accent);
-  background: none;
-  border: 0;
-  font: inherit;
-  cursor: pointer;
-  text-decoration: underline;
-  min-height: 44px;
-}
+nav { display: flex; align-items: center; gap: 2px; }
 
 main {
   width: min(920px, 100%);
@@ -167,8 +159,38 @@ h3 { font-size: 1.05rem; margin-top: 18px; }
 }
 .cutoff label { margin: 0; }
 
-.problems, .rules { list-style: none; padding: 0; margin: 12px 0 0; }
-.problems li, .rules li {
+.setting { margin-top: 16px; max-width: 360px; }
+.setting .meta { display: block; margin-top: 6px; }
+
+.assignments, .rules { list-style: none; padding: 0; margin: 12px 0 0; }
+.assignment {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  margin-top: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: white;
+}
+.assignment[hidden],
+#assignments.quiet > li[data-counts="0"],
+#assignments.quiet > li[data-ungraded="1"] {
+  display: none !important;
+}
+.assignment.grade-green { background: var(--on-bg); color: var(--on); }
+.assignment.grade-yellow { background: var(--wait-bg); color: var(--wait); }
+.assignment.grade-red { background: var(--off-bg); color: var(--off); }
+.assignment .course { font-weight: 700; }
+.assignment .name, .assignment .meta { display: block; }
+button.excuse { background: transparent; color: var(--off); border: 1px solid var(--off); }
+button.excuse.is-on, button.secondary.is-on {
+  background: var(--on);
+  color: white;
+  border-color: var(--on);
+}
+.rules li {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
@@ -224,6 +246,27 @@ button, .secondary {
 }
 button:disabled { opacity: 0.6; }
 button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+nav form { display: flex; align-items: center; margin: 0; }
+nav a,
+nav button.link {
+  display: inline-flex;
+  align-items: center;
+  margin: 0;
+  padding: 0 8px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.95rem;
+  line-height: 1;
+  text-decoration: none;
+  cursor: pointer;
+}
+nav a:hover,
+nav button.link:hover { color: var(--accent); text-decoration: underline; }
 .row, .stack, fieldset { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .inline { display: inline; }
 .sr {
@@ -245,21 +288,32 @@ button.secondary { background: transparent; color: var(--accent); border: 1px so
   grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
   gap: 10px;
 }
+.grade-board > li { display: flex; min-width: 0; }
 .grade {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  width: 100%;
   min-height: 88px;
   padding: 12px;
   border-radius: 12px;
   border: 1px solid var(--line);
   background: white;
 }
+button.grade {
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-height: 88px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+button.grade.is-selected { box-shadow: inset 0 0 0 2px currentColor; }
 .grade-score { font-size: 1.25rem; font-weight: 700; }
-.grade-green { background: var(--on-bg); color: var(--on); border-color: transparent; }
-.grade-yellow { background: var(--wait-bg); color: var(--wait); border-color: transparent; }
-.grade-red { background: var(--off-bg); color: var(--off); border-color: transparent; }
-.grade-none { color: var(--muted); }
+.grade.grade-green { background: var(--on-bg); color: var(--on); border-color: transparent; }
+.grade.grade-yellow { background: var(--wait-bg); color: var(--wait); border-color: transparent; }
+.grade.grade-red { background: var(--off-bg); color: var(--off); border-color: transparent; }
+.grade.grade-none { color: var(--muted); }
 .grade .meta, .grade-none .course { color: inherit; }
 .grade-none .meta, .grade-none .course { color: var(--muted); }
 
@@ -291,8 +345,8 @@ button.secondary { background: transparent; color: var(--accent); border: 1px so
 }
 
 @media (max-width: 640px) {
-  .problems li { grid-template-columns: 1fr; }
-  .problems li button { width: 100%; }
+  .assignment { grid-template-columns: 1fr; }
+  .assignment .excuse { justify-self: start; width: auto; }
   .override-form button, .toolbar button, .cutoff button { width: 100%; }
   .cutoff, .toolbar form { width: 100%; }
 }

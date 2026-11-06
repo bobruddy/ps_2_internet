@@ -7,8 +7,6 @@ import logging
 import os
 import threading
 from datetime import datetime, timedelta, timezone
-from urllib.parse import parse_qs, urlparse
-
 from ps_internet.client import PowerSchoolClient, PowerSchoolError
 from ps_internet.config import env
 from ps_internet.db import (
@@ -29,10 +27,11 @@ from ps_internet.db import (
     threshold,
 )
 from ps_internet.parse import (
+    assignment_window,
     assignments_from_lookup,
-    current_term,
     current_quarter_code,
     latest_quarter,
+    scores_terms,
     grades_disabled,
     parse_courses,
     parse_missing_context,
@@ -185,11 +184,11 @@ def _grade_sync() -> dict:
         collected = []
         errors = []
         for course in courses:
-            term = current_term(course, today)
-            if term is None or not term.scores_path:
+            window = assignment_window(course)
+            if window is None or not scores_terms(course):
                 continue
             try:
-                collected.extend(_course_assignments(client, course.name, term))
+                collected.extend(_collect_course(client, course, window))
             except PowerSchoolError as exc:
                 errors.append(f"{course.name}: {exc}")
         merged = _merge_missing(collected, missing)
@@ -241,10 +240,21 @@ def _enforce_grades() -> bool:
     return True
 
 
-def _course_assignments(client: PowerSchoolClient, course_name: str, term):
-    query = parse_qs(urlparse(term.scores_path).query)
-    begin = datetime.strptime(query["begdate"][0], "%m/%d/%Y").date().isoformat()
-    end = datetime.strptime(query["enddate"][0], "%m/%d/%Y").date().isoformat()
+def _collect_course(client: PowerSchoolClient, course, window):
+    """Ask for the whole year. If the year page has no section id, try a quarter page."""
+    failure = None
+    for term in scores_terms(course):
+        try:
+            return _course_assignments(client, course.name, term, window)
+        except PowerSchoolError as exc:
+            failure = exc
+    if failure is not None:
+        raise failure
+    return []
+
+
+def _course_assignments(client: PowerSchoolClient, course_name: str, term, window):
+    begin, end = window
     html = client.scores_page(term.scores_path)
     section_id, student_dcid = parse_scores_meta(html)
     if not section_id or not student_dcid:
@@ -252,8 +262,8 @@ def _course_assignments(client: PowerSchoolClient, course_name: str, term):
     payload = client.lookup_assignments(
         section_id,
         student_dcid,
-        begin,
-        end,
+        begin.isoformat(),
+        end.isoformat(),
         client.guardian_url(term.scores_path),
     )
     return assignments_from_lookup(payload, course_name, term.store_code)

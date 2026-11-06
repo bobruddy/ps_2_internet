@@ -37,7 +37,33 @@ def is_problem(assignment: dict, threshold: float) -> bool:
     return float(percent) < threshold
 
 
-def grade_band(percent: int | None) -> str | None:
+def assignment_rows(assignments: list[dict], excused_ids: set[str], threshold: float) -> list[dict]:
+    """Every assignment, newest due date first. A blank date stays at the bottom."""
+    rows = []
+    for item in assignments:
+        percent = item.get("percent")
+        number = None if percent is None else float(percent)
+        counts = is_problem(item, threshold)
+        if item.get("exempt"):
+            band = None
+        elif item.get("missing"):
+            band = "red"
+        else:
+            band = grade_band(number)
+        rows.append(
+            {
+                **item,
+                "band": band,
+                "counts": counts,
+                "excused": item["assignment_id"] in excused_ids,
+            }
+        )
+    rows.sort(key=lambda item: (item.get("course") or "", item.get("name") or ""))
+    rows.sort(key=lambda item: item.get("due_date") or "0000-00-00", reverse=True)
+    return rows
+
+
+def grade_band(percent: float | None) -> str | None:
     """Green above 84, yellow above 79, red below 80. A missing grade has no band."""
     if percent is None:
         return None
@@ -50,10 +76,16 @@ def grade_band(percent: int | None) -> str | None:
     return None
 
 
-def quarter_grades(courses: list[dict]) -> list[dict]:
-    """Latest quarter marks for display. Year grades are left out."""
+def quarter_grades(courses: list[dict], with_assignments: set[str] | None = None) -> list[dict]:
+    """Latest quarter marks for display. Year grades are left out.
+
+    When with_assignments is set, classes with no assignment this year are omitted.
+    """
     rows = []
     for course in courses:
+        name = course.get("name") or ""
+        if with_assignments is not None and name not in with_assignments:
+            continue
         code = str(course.get("store_code") or "")
         grade = course.get("grade") if code.upper().startswith("Q") else None
         shown_code = code if code.upper().startswith("Q") else ""
@@ -61,7 +93,7 @@ def quarter_grades(courses: list[dict]) -> list[dict]:
         rows.append(
             {
                 "period": course.get("period") or "",
-                "name": course.get("name") or "",
+                "name": name,
                 "store_code": shown_code,
                 "grade": grade,
                 "percent": percent,

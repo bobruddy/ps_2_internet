@@ -1,13 +1,23 @@
 <section class="card">
   <h2>Quarter grades</h2>
-  <p class="muted">Latest quarter only. These do not turn internet on or off.</p>
+  <p class="muted">Latest quarter only. These do not turn internet on or off.{% if selectable %} Click a class to filter assignments. Click it again to show every class.{% endif %}</p>
   {% if quarters %}
   <ul class="grade-board">
     {% for course in quarters %}
-    <li class="grade grade-{{ course.band or 'none' }}">
-      <span class="course">{{ course.name }}</span>
-      <span class="grade-score">{% if course.grade %}{{ course.grade }}{% else %}No grade yet{% endif %}</span>
-      {% if course.store_code %}<span class="meta">{{ course.store_code }}</span>{% endif %}
+    <li>
+      {% if selectable %}
+      <button type="button" class="grade grade-{{ course.band or 'none' }} course-filter" data-course="{{ course.name }}" aria-pressed="false">
+      {% else %}
+      <div class="grade grade-{{ course.band or 'none' }}">
+      {% endif %}
+        <span class="course">{{ course.name }}</span>
+        <span class="grade-score">{% if course.grade %}{{ course.grade }}{% else %}No grade yet{% endif %}</span>
+        {% if course.store_code %}<span class="meta">{{ course.store_code }}</span>{% endif %}
+      {% if selectable %}
+      </button>
+      {% else %}
+      </div>
+      {% endif %}
     </li>
     {% endfor %}
   </ul>

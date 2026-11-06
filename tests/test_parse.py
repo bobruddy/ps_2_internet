@@ -5,10 +5,12 @@ from datetime import date
 from ps_internet.parse import (
     Course,
     TermGrade,
+    assignment_window,
     assignments_from_lookup,
     current_quarter_code,
     current_term,
     latest_quarter,
+    scores_term,
     missing_from_query,
     parse_courses,
     parse_missing_context,
@@ -135,6 +137,19 @@ class ParseTests(unittest.TestCase):
         )
         self.assertEqual(latest_quarter(dated, date(2026, 11, 6), "Q1").store_code, "Q2")
         self.assertEqual(current_quarter_code([dated, course], date(2026, 11, 6)), "Q2")
+        self.assertEqual(assignment_window(dated), (date(2026, 9, 1), date(2027, 6, 1)))
+        self.assertEqual(scores_term(dated).store_code, "Y1")
+        quarter_only = Course(
+            "2",
+            "English",
+            None,
+            None,
+            [TermGrade("Q2", "A 95", "scores.html?begdate=11/01/2026&enddate=01/20/2027&fg=Q2")],
+            None,
+            None,
+        )
+        self.assertEqual(assignment_window(quarter_only), (date(2026, 11, 1), date(2027, 1, 20)))
+        self.assertEqual(scores_term(quarter_only).store_code, "Q2")
         self.assertIsNone(latest_quarter(Course("1", "Only year", None, None, [TermGrade("Y1", "A 90", None)], None, None), date(2026, 11, 6), "Y1"))
 
     def test_assignment_lookup_flags(self):

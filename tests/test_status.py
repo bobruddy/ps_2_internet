@@ -2,6 +2,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 from ps_internet.status import (
+    assignment_rows,
     desired_enabled,
     explain,
     format_local,
@@ -118,6 +119,15 @@ class StatusTests(unittest.TestCase):
         self.assertIsNone(by_name["French"]["band"])
         self.assertIsNone(by_name["Wood"]["grade"])
         self.assertEqual(by_name["Wood"]["store_code"], "")
+        shown = quarter_grades(
+            [
+                {"period": "1", "name": "French", "store_code": "Q2", "grade": None},
+                {"period": "2", "name": "History", "store_code": "Q2", "grade": "D 65"},
+                {"period": "8", "name": "Homeroom", "store_code": "Q2", "grade": None},
+            ],
+            {"History"},
+        )
+        self.assertEqual([row["name"] for row in shown], ["History"])
 
     def test_off_without_override_uses_the_assignments_as_the_reason(self):
         view = explain(
@@ -129,6 +139,33 @@ class StatusTests(unittest.TestCase):
         )
         self.assertEqual(view["state"], "off")
         self.assertIn("missing", view["why"])
+
+    def test_assignments_are_newest_first_and_colored_like_quarters(self):
+        rows = assignment_rows(
+            [
+                {"assignment_id": "old", "course": "History", "name": "Old", "due_date": "2026-08-31", "missing": False, "percent": 70, "exempt": False},
+                {"assignment_id": "new", "course": "History", "name": "New", "due_date": "2026-11-05", "missing": False, "percent": 90, "exempt": False},
+                {"assignment_id": "mid", "course": "Math", "name": "Quiz", "due_date": "2026-11-02", "missing": True, "percent": None, "exempt": False},
+                {"assignment_id": "blank", "course": "French", "name": "Essay", "due_date": None, "missing": False, "percent": 82, "exempt": False},
+                {"assignment_id": "ok", "course": "French", "name": "Drill", "due_date": "2026-11-01", "missing": False, "percent": 100, "exempt": False},
+                {"assignment_id": "open", "course": "Math", "name": "Lab", "due_date": "2026-11-06", "missing": False, "percent": None, "exempt": False},
+            ],
+            {"old"},
+            80,
+        )
+        self.assertEqual([row["assignment_id"] for row in rows], ["open", "new", "mid", "ok", "old", "blank"])
+        by_id = {row["assignment_id"]: row for row in rows}
+        self.assertIsNone(by_id["open"]["band"])
+        self.assertFalse(by_id["open"]["counts"])
+        self.assertEqual(by_id["new"]["band"], "green")
+        self.assertFalse(by_id["new"]["counts"])
+        self.assertEqual(by_id["mid"]["band"], "red")
+        self.assertTrue(by_id["mid"]["counts"])
+        self.assertEqual(by_id["blank"]["band"], "yellow")
+        self.assertFalse(by_id["blank"]["counts"])
+        self.assertEqual(by_id["old"]["band"], "red")
+        self.assertTrue(by_id["old"]["excused"])
+        self.assertTrue(by_id["old"]["counts"])
 
     def test_displayed_times_use_the_chosen_zone(self):
         stored = "2026-11-06T16:04:00+00:00"

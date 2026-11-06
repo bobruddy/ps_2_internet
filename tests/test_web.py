@@ -29,7 +29,8 @@ class AdminRuleChoiceTests(unittest.TestCase):
         token = login.text.split('name="csrf" value="', 1)[1].split('"', 1)[0]
         signed_in = self.client.post("/admin/login", data={"password": "test", "csrf": token})
         self.assertEqual(signed_in.status_code, 200)
-        self.assertIn("QoS rules", signed_in.text)
+        self.assertIn("Assignments", signed_in.text)
+        self.assertNotIn("QoS rules", signed_in.text)
 
     def tearDown(self):
         if self._old_db is None:
@@ -39,7 +40,7 @@ class AdminRuleChoiceTests(unittest.TestCase):
         self._dir.cleanup()
 
     def test_each_rule_can_be_rule_based_override_or_both(self):
-        page = self.client.get("/admin")
+        page = self.client.get("/admin/settings")
         self.assertIn("Rule based", page.text)
         self.assertIn("Override", page.text)
         self._save("fast", use_rules=True, use_override=False)
@@ -49,7 +50,7 @@ class AdminRuleChoiceTests(unittest.TestCase):
         self.assertFalse(rows["fast"]["use_override"])
         self.assertTrue(rows["slow"]["use_rules"])
         self.assertTrue(rows["slow"]["use_override"])
-        again = self.client.get("/admin")
+        again = self.client.get("/admin/settings")
         fast = again.text.split("student_uptime_morning", 1)[1].split("</form>", 1)[0]
         slow = again.text.split("student_basespeed", 1)[1].split("</form>", 1)[0]
         self.assertIn('name="use_rules" value="1" checked', fast)
@@ -58,7 +59,7 @@ class AdminRuleChoiceTests(unittest.TestCase):
         self.assertIn('name="use_override" value="1" checked', slow)
 
     def _save(self, policy_id: str, use_rules: bool, use_override: bool) -> None:
-        page = self.client.get("/admin")
+        page = self.client.get("/admin/settings")
         token = page.text.split('name="csrf" value="', 1)[1].split('"', 1)[0]
         data = {"csrf": token, "policy_id": policy_id, "when_internet": "enable"}
         if use_rules:

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Admin{% endblock %}
 {% block nav %}
+<a href="/admin/settings">Settings</a>
 <form method="post" action="/admin/logout" class="inline">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <button class="link" type="submit">Sign out</button>
@@ -51,119 +52,46 @@
 <section class="card">
   <div class="section-head">
     <h1>Admin{% if student %} · {{ student }}{% endif %}</h1>
-  </div>
-  <p class="muted">Grades are pulled every hour. An unexcused missing assignment, or a score under the cutoff, turns internet off. Quarter grades are shown only. Excused work stays out of the count.</p>
-  <p class="muted">Last grade check: {{ sync_at or "not yet" }}.{% if sync_error %} {{ sync_error }}{% endif %}</p>
-  <div class="toolbar">
     <form method="post" action="/admin/sync">
       <input type="hidden" name="csrf" value="{{ csrf }}">
-      <button type="submit">Check PowerSchool now</button>
-    </form>
-    <form method="post" action="/admin/threshold" class="cutoff">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <label for="percent">Cutoff</label>
-      <input id="percent" name="percent" type="number" min="1" max="100" step="1" inputmode="numeric" value="{{ threshold|int }}" required>
-      <button type="submit">Save</button>
-    </form>
-    <form method="post" action="/admin/timezone" class="cutoff">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <label for="timezone">Time zone</label>
-      <select id="timezone" name="timezone_name">
-        {% for value, label in timezones %}
-        <option value="{{ value }}" {% if value == timezone %}selected{% endif %}>{{ label }}</option>
-        {% endfor %}
-      </select>
-      <button type="submit">Save</button>
+      <button type="submit" class="secondary">Check PowerSchool now</button>
     </form>
   </div>
+  <p class="muted">Last grade check: {{ sync_at or "not yet" }}.{% if sync_error %} {{ sync_error }}{% endif %}</p>
 </section>
 
-{% include "quarters.html" %}
+{% with selectable=true %}{% include "quarters.html" %}{% endwith %}
 
 <section class="card">
-  <h2>Problem assignments</h2>
-  <p id="problems-empty" {% if problems %}hidden{% endif %}>No unexcused problem assignments.</p>
-  <ul class="problems" id="problems">
-    {% for item in problems %}
-    <li>
+  <div class="section-head">
+    <h2>Assignments</h2>
+    <button type="button" id="only-counts" class="secondary" aria-pressed="false">Hide passing work</button>
+  </div>
+  <p class="muted">Newest first. Click a quarter card to show one class. Hide passing work hides scores of {{ threshold|int }}% or higher, and work that is not graded yet. Missing assignments and scores under {{ threshold|int }}% stay.</p>
+  <p id="assignments-empty" hidden>Nothing in this view.</p>
+  <ul class="assignments" id="assignments">
+    {% for item in assignments %}
+    <li class="assignment grade-{{ item.band or 'none' }}" data-course="{{ item.course }}" data-counts="{{ '1' if item.counts else '0' }}" data-ungraded="{{ '1' if (not item.missing and item.percent is none) else '0' }}">
       <div class="item-copy">
         <span class="course">{{ item.course }}</span>
         <span class="name">{{ item.name }}</span>
         <span class="meta">
           {% if item.due_date %}Due {{ item.due_date }} · {% endif %}
-          {% if item.missing %}Missing{% elif item.percent is not none %}{{ item.percent|round|int }}%{% endif %}
+          {% if item.missing %}Missing{% elif item.percent is not none %}{{ item.percent|round|int }}%{% else %}Not graded{% endif %}
           {% if item.letter %} · {{ item.letter }}{% endif %}
         </span>
       </div>
+      {% if item.counts %}
       <form method="post" action="/admin/excuse" data-live="excuse">
         <input type="hidden" name="csrf" value="{{ csrf }}">
         <input type="hidden" name="assignment_id" value="{{ item.assignment_id }}">
-        <input type="hidden" name="excused" value="1">
-        <button type="submit">Excuse</button>
+        <input type="hidden" name="excused" value="{{ '0' if item.excused else '1' }}">
+        <button type="submit" class="excuse{% if item.excused %} is-on{% endif %}" aria-pressed="{{ 'true' if item.excused else 'false' }}">Excuse</button>
       </form>
+      {% endif %}
     </li>
     {% endfor %}
   </ul>
-
-  <h3 id="excused-heading" {% if not excused_rows %}hidden{% endif %}>Excused</h3>
-  <ul class="problems excused" id="excused">
-    {% for item in excused_rows %}
-    <li>
-      <div class="item-copy">
-        <span class="course">{{ item.course }}</span>
-        <span class="name">{{ item.name }}</span>
-      </div>
-      <form method="post" action="/admin/excuse" data-live="excuse">
-        <input type="hidden" name="csrf" value="{{ csrf }}">
-        <input type="hidden" name="assignment_id" value="{{ item.assignment_id }}">
-        <input type="hidden" name="excused" value="0">
-        <button type="submit">Count it again</button>
-      </form>
-    </li>
-    {% endfor %}
-  </ul>
-</section>
-
-<section class="card">
-  <div class="section-head">
-    <h2>QoS rules</h2>
-  </div>
-  <p class="muted">Rules whose names start with “{{ rule_match }}”. Changes save as you make them. Rule based follows grades. Override is the timed control. A rule can be either or both. Resume or pause is the internet-on position.</p>
-  <p class="muted">Last rule check: {{ rules_at or "not yet" }}.{% if rules_error %} {{ rules_error }}{% endif %}</p>
-  <form method="post" action="/admin/rules/refresh">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <button type="submit" class="secondary">Discover new rules</button>
-  </form>
-  {% if rules %}
-  <ul class="rules">
-    {% for rule in rules %}
-    <li class="{% if not rule.present %}gone{% endif %}">
-      <form method="post" action="/admin/rules" data-live="rule">
-        <input type="hidden" name="csrf" value="{{ csrf }}">
-        <input type="hidden" name="policy_id" value="{{ rule.policy_id }}">
-        <div class="rule-head">
-          <strong>{{ rule.name }}</strong>
-          <span class="meta">{{ rule.description }} · {% if rule.enabled %}resumed{% elif rule.enabled is none %}unknown{% else %}paused{% endif %}{% if not rule.present %} · not on the gateway{% endif %}</span>
-        </div>
-        <div class="rule-controls">
-          <label class="check"><input type="checkbox" name="use_rules" value="1" {% if rule.use_rules %}checked{% endif %}> Rule based</label>
-          <label class="check"><input type="checkbox" name="use_override" value="1" {% if rule.use_override %}checked{% endif %}> Override</label>
-          <label class="direction">
-            When internet is allowed
-            <select name="when_internet">
-              <option value="enable" {% if rule.when_internet == 'enable' %}selected{% endif %}>Resume this rule</option>
-              <option value="disable" {% if rule.when_internet == 'disable' %}selected{% endif %}>Pause this rule</option>
-            </select>
-          </label>
-        </div>
-        <noscript><button type="submit">Save rule</button></noscript>
-      </form>
-    </li>
-    {% endfor %}
-  </ul>
-  {% else %}
-  <p>No matching rules yet. Discover new rules after the {{ rule_match }} rules are on the gateway.</p>
-  {% endif %}
 </section>
 {% endblock %}
 {% block scripts %}<script src="/static/app.js"></script>{% endblock %}

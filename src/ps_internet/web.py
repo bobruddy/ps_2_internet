@@ -39,7 +39,15 @@ from ps_internet.jobs import (
     refresh_rules,
     scheduler_enabled,
 )
-from ps_internet.status import TIMEZONES, explain, format_local, quarter_grades, rules_allow_internet, unexcused_problems
+from ps_internet.status import (
+    TIMEZONES,
+    assignment_rows,
+    explain,
+    format_local,
+    quarter_grades,
+    rules_allow_internet,
+    unexcused_problems,
+)
 from ps_internet.unifi import UnifiError
 
 log = logging.getLogger("ps_internet")
@@ -120,32 +128,42 @@ def admin(request: Request):
     cutoff = threshold()
     assignments = list_assignments()
     excused = excused_ids()
-    problems = unexcused_problems(assignments, excused, cutoff)
-    excused_rows = [row for row in assignments if row["assignment_id"] in excused]
     courses = json.loads(get_meta("courses_json", "[]") or "[]")
     return templates.TemplateResponse(
         request,
         "admin.html",
         {
-            "request": request,
-            "csrf": _csrf(request),
-            "notice": request.query_params.get("notice", ""),
-            "error": request.query_params.get("error", ""),
+            **_admin_common(request),
             "threshold": cutoff,
-            "problems": problems,
-            "excused_rows": excused_rows,
-            "quarters": quarter_grades(courses),
-            "rules": list_rules(),
-            "rule_match": env("UNIFI_RULE_MATCH", ""),
+            "assignments": assignment_rows(assignments, excused, cutoff),
+            "quarters": quarter_grades(courses, {item["course"] for item in assignments}),
             "override": get_override(),
             "override_until": _local((get_override() or {}).get("until_at")),
+            "sync_at": _local(get_meta("sync_at")),
+            "sync_error": get_meta("sync_error", "") or "",
+            "student": get_meta("student_name", "") or "",
+        },
+    )
+
+
+@app.get("/admin/settings", response_class=HTMLResponse)
+def admin_settings(request: Request):
+    if not request.session.get("admin"):
+        return RedirectResponse("/admin/login", status_code=303)
+    return templates.TemplateResponse(
+        request,
+        "settings.html",
+        {
+            **_admin_common(request),
+            "threshold": threshold(),
+            "rules": list_rules(),
+            "rule_match": env("UNIFI_RULE_MATCH", ""),
             "sync_at": _local(get_meta("sync_at")),
             "sync_error": get_meta("sync_error", "") or "",
             "rules_error": get_meta("rules_error", "") or "",
             "rules_at": _local(get_meta("rules_refreshed_at")),
             "timezone": display_timezone(),
             "timezones": TIMEZONES,
-            "student": get_meta("student_name", "") or "",
         },
     )
 
@@ -174,6 +192,13 @@ def save_threshold(request: Request, percent: str = Form(...), csrf: str = Form(
     if value <= 0 or value > 100:
         return _back_error("Cutoff must be between 1 and 100.")
     set_meta("threshold_percent", str(value))
+    if _wants_json(request):
+        try:
+            enforce_grades()
+        except Exception as exc:
+            log.exception("grade rule failed")
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        return JSONResponse({"ok": True})
     return _after_grade_change("Cutoff saved.")
 
 
@@ -184,6 +209,8 @@ def save_timezone(request: Request, timezone_name: str = Form(""), csrf: str = F
     if timezone_name not in allowed:
         return _back_error("Pick a time zone from the list.")
     set_meta("display_timezone", timezone_name)
+    if _wants_json(request):
+        return JSONResponse({"ok": True})
     return _back("Time zone saved.")
 
 
@@ -269,9 +296,19 @@ def override_clear(request: Request, csrf: str = Form("")):
     return _back("Override cleared and the previous rule states restored.")
 
 
+def _admin_common(request: Request) -> dict:
+    return {
+        "request": request,
+        "csrf": _csrf(request),
+        "notice": request.query_params.get("notice", ""),
+        "error": request.query_params.get("error", ""),
+    }
+
+
 def _status_view() -> dict:
     cutoff = threshold()
-    problems = unexcused_problems(list_assignments(), excused_ids(), cutoff)
+    assignments = list_assignments()
+    problems = unexcused_problems(assignments, excused_ids(), cutoff)
     rules = list_rules()
     internet_on = rules_allow_internet(rules)
     view = explain(
@@ -282,7 +319,10 @@ def _status_view() -> dict:
         now=datetime.now(timezone.utc),
         zone=display_timezone(),
     )
-    view["quarters"] = quarter_grades(json.loads(get_meta("courses_json", "[]") or "[]"))
+    view["quarters"] = quarter_grades(
+        json.loads(get_meta("courses_json", "[]") or "[]"),
+        {item["course"] for item in assignments},
+    )
     view["threshold"] = cutoff
     return view
 

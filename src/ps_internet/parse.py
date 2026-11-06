@@ -434,6 +434,32 @@ def _term_span(term: TermGrade) -> tuple[date, date] | None:
     return datetime.strptime(beg, "%m/%d/%Y").date(), datetime.strptime(end, "%m/%d/%Y").date()
 
 
+def assignment_window(course: Course) -> tuple[date, date] | None:
+    """Earliest start and latest end across every reporting term, so a lookup covers the year."""
+    spans = [span for term in course.terms if (span := _term_span(term)) is not None]
+    if not spans:
+        return None
+    return min(span[0] for span in spans), max(span[1] for span in spans)
+
+
+def scores_terms(course: Course) -> list[TermGrade]:
+    """Scores pages for this class, widest span first. The year page leads when it is posted."""
+    ranked: list[tuple[int, TermGrade]] = []
+    for term in course.terms:
+        if not term.scores_path:
+            continue
+        span = _term_span(term)
+        days = (span[1] - span[0]).days if span else -1
+        ranked.append((days, term))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    return [term for _days, term in ranked]
+
+
+def scores_term(course: Course) -> TermGrade | None:
+    terms = scores_terms(course)
+    return terms[0] if terms else None
+
+
 def parse_scores_ids(html: str) -> tuple[str | None, str | None]:
     section = re.search(r'data-sectionid="(\d+)"', html)
     frn = re.search(r"studentFRN\s*=\s*'(\d+)'", html)
