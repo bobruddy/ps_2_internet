@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Internet status{% endblock %}
+{% block body %}
+<section class="status status-{{ view.state }}">
+  <p class="eyebrow">Right now</p>
+  <h1>{{ view.headline }}</h1>
+  {% if view.why %}<p class="why">{{ view.why }}</p>{% endif %}
+</section>
+
+{% with quarters=view.quarters %}{% include "quarters.html" %}{% endwith %}
+
+{% if view.show_problems %}
+<section class="card">
+  <h2>{% if view.state == 'off' %}Why{% else %}Assignments to fix{% endif %}</h2>
+  <p class="muted">Missing work, or a score under {{ view.threshold|int }}%. Excused assignments are left out.</p>
+  <ul class="problems">
+    {% for item in view.problems %}
+    <li>
+      <span class="course">{{ item.course }}</span>
+      <span class="name">{{ item.name }}</span>
+      <span class="meta">
+        {% if item.due_date %}Due {{ item.due_date }}{% endif %}
+        {% if item.missing %}Missing{% elif item.percent is not none %}{{ item.percent|round|int }}%{% endif %}
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% elif view.state == 'on' %}
+<section class="card">
+  <p class="muted">Nothing missing, and nothing under {{ view.threshold|int }}%, is counting right now.</p>
+</section>
+{% endif %}
+
+{% if sync_at %}<p class="foot">Grades last checked {{ sync_at }}. They are checked again every hour.</p>{% endif %}
+{% endblock %}

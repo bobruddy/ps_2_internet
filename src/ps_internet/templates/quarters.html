@@ -1,0 +1,17 @@
+<section class="card">
+  <h2>Quarter grades</h2>
+  <p class="muted">Latest quarter only. These do not turn internet on or off.</p>
+  {% if quarters %}
+  <ul class="grade-board">
+    {% for course in quarters %}
+    <li class="grade grade-{{ course.band or 'none' }}">
+      <span class="course">{{ course.name }}</span>
+      <span class="grade-score">{% if course.grade %}{{ course.grade }}{% else %}No grade yet{% endif %}</span>
+      {% if course.store_code %}<span class="meta">{{ course.store_code }}</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>No quarter grades yet.</p>
+  {% endif %}
+</section>

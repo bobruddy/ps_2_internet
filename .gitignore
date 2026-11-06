@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+data/
+*.egg-info/
+.DS_Store
+docker-compose.override.yml
+*.db
+*.sqlite
+*.sqlite3
