@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Students{% endblock %}
+{% block nav %}
+<form method="post" action="/admin/logout" class="inline">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <button class="link" type="submit">Sign out</button>
+</form>
+{% endblock %}
+{% block body %}
+{% if notice %}<p class="notice">{{ notice }}</p>{% endif %}
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+<section class="card">
+  <div class="section-head">
+    <h1>Students</h1>
+    <form method="post" action="/admin/sync">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit" class="secondary">Check PowerSchool now</button>
+    </form>
+  </div>
+  <p class="muted">Each student has their own grades, excuses, rules, and private link. Click a card to open that student.</p>
+  {% if students %}
+  <ul class="student-board">
+    {% for student in students %}
+    <li>
+      <a class="student-pick" href="/admin/students/{{ student.student_id }}" style="view-transition-name: s{{ student.student_id }}">
+        <span class="course">{{ student.first_name }}</span>
+        {% if student.full_name and student.full_name != student.first_name %}
+        <span class="meta">{{ student.full_name }}</span>
+        {% endif %}
+        <span class="meta">{% if student.public_enabled %}Private link on{% else %}Private link off{% endif %}</span>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>No students yet. Check PowerSchool to find everyone on the parent account.</p>
+  {% endif %}
+</section>
+{% endblock %}
