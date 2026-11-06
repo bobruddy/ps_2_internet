@@ -25,6 +25,7 @@ from ps_internet.db import (
     set_override,
     set_rule_enabled,
     scope_uptime_rules_once,
+    display_timezone,
     threshold,
 )
 from ps_internet.parse import (
@@ -41,6 +42,7 @@ from ps_internet.parse import (
 from ps_internet.status import (
     desired_enabled,
     grades_allow_internet,
+    zone_for,
     restore_after_override,
     rules_allow_internet,
     rules_for_grades,
@@ -179,7 +181,7 @@ def _grade_sync() -> dict:
         context = parse_missing_context(client.missing_page())
         missing = client.missing_assignments(context["year_id"], context["student_dcid"])
         courses = parse_courses(home)
-        today = datetime.now().astimezone().date()
+        today = datetime.now(zone_for(display_timezone())).date()
         collected = []
         errors = []
         for course in courses:

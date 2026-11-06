@@ -65,6 +65,16 @@
       <input id="percent" name="percent" type="number" min="1" max="100" step="1" inputmode="numeric" value="{{ threshold|int }}" required>
       <button type="submit">Save</button>
     </form>
+    <form method="post" action="/admin/timezone" class="cutoff">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label for="timezone">Time zone</label>
+      <select id="timezone" name="timezone_name">
+        {% for value, label in timezones %}
+        <option value="{{ value }}" {% if value == timezone %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">Save</button>
+    </form>
   </div>
 </section>
 

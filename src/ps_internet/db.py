@@ -101,6 +101,14 @@ def set_meta(key: str, value: str) -> None:
         )
 
 
+def display_timezone() -> str:
+    from ps_internet.status import DEFAULT_TIMEZONE, TIMEZONES
+
+    allowed = {key for key, _label in TIMEZONES}
+    raw = (get_meta("display_timezone", DEFAULT_TIMEZONE) or DEFAULT_TIMEZONE).strip()
+    return raw if raw in allowed else DEFAULT_TIMEZONE
+
+
 def threshold() -> float:
     raw = get_meta("threshold_percent", "80") or "80"
     try:

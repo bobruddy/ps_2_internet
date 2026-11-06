@@ -11,8 +11,8 @@
 
 {% if view.show_problems %}
 <section class="card">
-  <h2>{% if view.state == 'off' %}Why{% else %}Assignments to fix{% endif %}</h2>
-  <p class="muted">Missing work, or a score under {{ view.threshold|int }}%. Excused assignments are left out.</p>
+  <h2>Assignments to fix</h2>
+  <p class="muted">Missing work, or a score under {{ view.threshold|int }}%. Excused assignments are left out.{% if view.state == 'on' and view.why %} They stay listed while a parent override has internet on.{% endif %}</p>
   <ul class="problems">
     {% for item in view.problems %}
     <li>

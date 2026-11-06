@@ -5,7 +5,18 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-EASTERN = ZoneInfo("America/New_York")
+DEFAULT_TIMEZONE = "America/New_York"
+EASTERN = ZoneInfo(DEFAULT_TIMEZONE)
+TIMEZONES = (
+    ("America/New_York", "US/Eastern"),
+    ("America/Chicago", "US/Central"),
+    ("America/Denver", "US/Mountain"),
+    ("America/Phoenix", "US/Arizona"),
+    ("America/Los_Angeles", "US/Pacific"),
+    ("America/Anchorage", "US/Alaska"),
+    ("Pacific/Honolulu", "US/Hawaii"),
+    ("UTC", "UTC"),
+)
 
 
 def course_percent(grade: str | None) -> int | None:
@@ -118,18 +129,19 @@ def explain(
     override: dict | None,
     problems: list[dict],
     now: datetime,
+    zone: str | None = None,
 ) -> dict:
     active = _active_override(override, now)
     if active is not None:
         on = bool(active["internet_on"])
-        until = _format_local(active["until_at"])
+        until = format_local(active["until_at"], zone)
         verb = "on" if on else "off"
         return {
             "state": "on" if on else "off",
             "headline": f"Internet is {verb}.",
             "why": f"A parent turned it {verb} until {until}.",
-            "problems": [] if on else problems,
-            "show_problems": not on and bool(problems),
+            "problems": problems,
+            "show_problems": bool(problems),
         }
     if not configured or internet_on is None:
         return {
@@ -171,8 +183,17 @@ def _active_override(override: dict | None, now: datetime) -> dict | None:
     return override
 
 
-def _format_local(value: str) -> str:
+def zone_for(name: str | None) -> ZoneInfo:
+    wanted = name or DEFAULT_TIMEZONE
+    if wanted not in {key for key, _label in TIMEZONES}:
+        wanted = DEFAULT_TIMEZONE
+    return ZoneInfo(wanted)
+
+
+def format_local(value: str | None, zone_name: str | None = None) -> str:
+    if not value:
+        return ""
     moment = datetime.fromisoformat(value)
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=ZoneInfo("UTC"))
-    return moment.astimezone(EASTERN).strftime("%b %-d, %-I:%M %p")
+    return moment.astimezone(zone_for(zone_name)).strftime("%b %-d, %-I:%M %p %Z")

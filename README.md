@@ -56,7 +56,7 @@ Optional process settings:
 | `APP_DB` | SQLite path. Default is `data/app.db` |
 | `PS_SCHEDULER` | Set to `0` to disable the background checks |
 
-The background loop checks PowerSchool every hour, refreshes the rule list every five minutes, and expires an override about every thirty seconds. Times on the site are shown in `America/New_York`.
+The background loop checks PowerSchool every hour, refreshes the rule list every five minutes, and expires an override about every thirty seconds. Times on the site use the time zone chosen on the admin page. That starts as US/Eastern.
 
 ## Run locally
 

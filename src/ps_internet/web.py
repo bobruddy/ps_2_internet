@@ -18,6 +18,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from ps_internet.config import env, load_dotenv
 from ps_internet.db import (
+    display_timezone,
     excused_ids,
     get_meta,
     get_override,
@@ -38,7 +39,7 @@ from ps_internet.jobs import (
     refresh_rules,
     scheduler_enabled,
 )
-from ps_internet.status import explain, quarter_grades, rules_allow_internet, unexcused_problems
+from ps_internet.status import TIMEZONES, explain, format_local, quarter_grades, rules_allow_internet, unexcused_problems
 from ps_internet.unifi import UnifiError
 
 log = logging.getLogger("ps_internet")
@@ -142,6 +143,8 @@ def admin(request: Request):
             "sync_error": get_meta("sync_error", "") or "",
             "rules_error": get_meta("rules_error", "") or "",
             "rules_at": _local(get_meta("rules_refreshed_at")),
+            "timezone": display_timezone(),
+            "timezones": TIMEZONES,
             "student": get_meta("student_name", "") or "",
         },
     )
@@ -172,6 +175,16 @@ def save_threshold(request: Request, percent: str = Form(...), csrf: str = Form(
         return _back_error("Cutoff must be between 1 and 100.")
     set_meta("threshold_percent", str(value))
     return _after_grade_change("Cutoff saved.")
+
+
+@app.post("/admin/timezone")
+def save_timezone(request: Request, timezone_name: str = Form(""), csrf: str = Form("")):
+    _guard(request, csrf)
+    allowed = {key for key, _label in TIMEZONES}
+    if timezone_name not in allowed:
+        return _back_error("Pick a time zone from the list.")
+    set_meta("display_timezone", timezone_name)
+    return _back("Time zone saved.")
 
 
 @app.post("/admin/rules")
@@ -267,6 +280,7 @@ def _status_view() -> dict:
         override=get_override(),
         problems=problems,
         now=datetime.now(timezone.utc),
+        zone=display_timezone(),
     )
     view["quarters"] = quarter_grades(json.loads(get_meta("courses_json", "[]") or "[]"))
     view["threshold"] = cutoff
@@ -329,9 +343,4 @@ def _back_error(message: str) -> RedirectResponse:
 
 
 def _local(value: str | None) -> str:
-    if not value:
-        return ""
-    moment = datetime.fromisoformat(value)
-    if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=timezone.utc)
-    return moment.astimezone().strftime("%b %-d, %-I:%M %p")
+    return format_local(value, display_timezone())

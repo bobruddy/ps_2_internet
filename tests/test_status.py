@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from ps_internet.status import (
     desired_enabled,
     explain,
+    format_local,
     grade_band,
     grades_allow_internet,
     is_problem,
@@ -76,6 +77,21 @@ class StatusTests(unittest.TestCase):
         self.assertEqual(view["state"], "off")
         self.assertIn("parent", view["why"])
         self.assertEqual(view["problems"], [{"name": "Outline"}])
+        self.assertTrue(view["show_problems"])
+
+    def test_an_on_override_still_lists_unexcused_problems(self):
+        now = datetime(2026, 11, 6, 15, tzinfo=timezone.utc)
+        view = explain(
+            configured=True,
+            internet_on=False,
+            override={"active": True, "internet_on": True, "until_at": (now + timedelta(hours=2)).isoformat()},
+            problems=[{"name": "Outline"}],
+            now=now,
+        )
+        self.assertEqual(view["state"], "on")
+        self.assertIn("parent", view["why"])
+        self.assertEqual(view["problems"], [{"name": "Outline"}])
+        self.assertTrue(view["show_problems"])
 
     def test_internet_follows_assignments_and_not_the_quarter_grade(self):
         missing = [{"assignment_id": "1", "missing": True}]
@@ -113,6 +129,22 @@ class StatusTests(unittest.TestCase):
         )
         self.assertEqual(view["state"], "off")
         self.assertIn("missing", view["why"])
+
+    def test_displayed_times_use_the_chosen_zone(self):
+        stored = "2026-11-06T16:04:00+00:00"
+        self.assertEqual(format_local(stored, "America/New_York"), "Nov 6, 11:04 AM EST")
+        self.assertEqual(format_local(stored, "America/Los_Angeles"), "Nov 6, 8:04 AM PST")
+        self.assertEqual(format_local(stored, "not-a-zone"), "Nov 6, 11:04 AM EST")
+        now = datetime(2026, 11, 6, 16, tzinfo=timezone.utc)
+        view = explain(
+            configured=True,
+            internet_on=False,
+            override={"active": True, "internet_on": True, "until_at": "2026-11-06T18:04:00+00:00"},
+            problems=[],
+            now=now,
+            zone="America/Chicago",
+        )
+        self.assertIn("12:04 PM CST", view["why"])
 
 
 if __name__ == "__main__":
