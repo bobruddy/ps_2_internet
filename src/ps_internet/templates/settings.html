@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block nav %}
+<a href="/admin">Admin</a>
+<form method="post" action="/admin/logout" class="inline">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <button class="link" type="submit">Sign out</button>
+</form>
+{% endblock %}
+{% block body %}
+{% if notice %}<p class="notice">{{ notice }}</p>{% endif %}
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+<section class="card">
+  <h1>Settings</h1>
+  <p class="muted">These stay put. A change saves on its own.</p>
+  <form method="post" action="/admin/threshold" class="setting" data-live="setting">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="percent">Cutoff</label>
+    <input id="percent" name="percent" type="number" min="1" max="100" step="1" inputmode="numeric" value="{{ threshold|int }}" required>
+    <span class="meta">A score under this counts against internet. Missing work always counts.</span>
+    <noscript><button type="submit">Save cutoff</button></noscript>
+  </form>
+  <form method="post" action="/admin/timezone" class="setting" data-live="setting">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="timezone">Time zone</label>
+    <select id="timezone" name="timezone_name">
+      {% for value, label in timezones %}
+      <option value="{{ value }}" {% if value == timezone %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <noscript><button type="submit">Save time zone</button></noscript>
+  </form>
+  <p class="muted">Last grade check: {{ sync_at or "not yet" }}.{% if sync_error %} {{ sync_error }}{% endif %}</p>
+</section>
+
+<section class="card">
+  <div class="section-head">
+    <h2>QoS rules</h2>
+  </div>
+  <p class="muted">Rules whose names start with “{{ rule_match }}”. A change saves as you make it. Rule based follows grades. Override is the timed control. A rule can be either or both. Resume or pause is the internet-on position.</p>
+  <p class="muted">Last rule check: {{ rules_at or "not yet" }}.{% if rules_error %} {{ rules_error }}{% endif %}</p>
+  <form method="post" action="/admin/rules/refresh">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit" class="secondary">Discover new rules</button>
+  </form>
+  {% if rules %}
+  <ul class="rules">
+    {% for rule in rules %}
+    <li class="{% if not rule.present %}gone{% endif %}">
+      <form method="post" action="/admin/rules" data-live="rule">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="policy_id" value="{{ rule.policy_id }}">
+        <div class="rule-head">
+          <strong>{{ rule.name }}</strong>
+          <span class="meta">{{ rule.description }} · {% if rule.enabled %}resumed{% elif rule.enabled is none %}unknown{% else %}paused{% endif %}{% if not rule.present %} · not on the gateway{% endif %}</span>
+        </div>
+        <div class="rule-controls">
+          <label class="check"><input type="checkbox" name="use_rules" value="1" {% if rule.use_rules %}checked{% endif %}> Rule based</label>
+          <label class="check"><input type="checkbox" name="use_override" value="1" {% if rule.use_override %}checked{% endif %}> Override</label>
+          <label class="direction">
+            When internet is allowed
+            <select name="when_internet">
+              <option value="enable" {% if rule.when_internet == 'enable' %}selected{% endif %}>Resume this rule</option>
+              <option value="disable" {% if rule.when_internet == 'disable' %}selected{% endif %}>Pause this rule</option>
+            </select>
+          </label>
+        </div>
+        <noscript><button type="submit">Save rule</button></noscript>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>No matching rules yet. Discover new rules after the {{ rule_match }} rules are on the gateway.</p>
+  {% endif %}
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/app.js"></script>{% endblock %}

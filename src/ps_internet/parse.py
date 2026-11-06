@@ -460,6 +460,32 @@ def scores_term(course: Course) -> TermGrade | None:
     return terms[0] if terms else None
 
 
+def quarter_code_for_date(course: Course, due: date | None) -> str:
+    """The quarter whose dates contain this due date. A date outside every quarter uses the nearest one."""
+    quarters: list[tuple[str, tuple[date, date]]] = []
+    for term in course.terms:
+        match = _QUARTER.match(term.store_code or "")
+        span = _term_span(term)
+        if not match or span is None:
+            continue
+        quarters.append((term.store_code.upper(), span))
+    if due is None or not quarters:
+        return ""
+    containing = [(code, span) for code, span in quarters if span[0] <= due <= span[1]]
+    if containing:
+        containing.sort(key=lambda item: (item[1][1] - item[1][0]).days)
+        return containing[0][0]
+
+    def distance(span: tuple[date, date]) -> int:
+        start, end = span
+        if due < start:
+            return (start - due).days
+        return (due - end).days
+
+    quarters.sort(key=lambda item: (distance(item[1]), item[0]))
+    return quarters[0][0]
+
+
 def parse_scores_ids(html: str) -> tuple[str | None, str | None]:
     section = re.search(r'data-sectionid="(\d+)"', html)
     frn = re.search(r"studentFRN\s*=\s*'(\d+)'", html)

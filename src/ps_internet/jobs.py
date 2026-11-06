@@ -6,7 +6,7 @@ import json
 import logging
 import os
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from ps_internet.client import PowerSchoolClient, PowerSchoolError
 from ps_internet.config import env
 from ps_internet.db import (
@@ -31,6 +31,7 @@ from ps_internet.parse import (
     assignments_from_lookup,
     current_quarter_code,
     latest_quarter,
+    quarter_code_for_date,
     scores_terms,
     grades_disabled,
     parse_courses,
@@ -245,12 +246,28 @@ def _collect_course(client: PowerSchoolClient, course, window):
     failure = None
     for term in scores_terms(course):
         try:
-            return _course_assignments(client, course.name, term, window)
+            rows = _course_assignments(client, course.name, term, window)
         except PowerSchoolError as exc:
             failure = exc
+            continue
+        _stamp_quarters(course, rows)
+        return rows
     if failure is not None:
         raise failure
     return []
+
+
+def _stamp_quarters(course, rows) -> None:
+    for row in rows:
+        due = None
+        if row.due_date:
+            try:
+                due = date.fromisoformat(str(row.due_date)[:10])
+            except ValueError:
+                due = None
+        code = quarter_code_for_date(course, due)
+        if code:
+            row.store_code = code
 
 
 def _course_assignments(client: PowerSchoolClient, course_name: str, term, window):

@@ -77,6 +77,7 @@
         <span class="name">{{ item.name }}</span>
         <span class="meta">
           {% if item.due_date %}Due {{ item.due_date }} · {% endif %}
+          {% if item.store_code and item.store_code.upper().startswith('Q') %}{{ item.store_code }} · {% endif %}
           {% if item.missing %}Missing{% elif item.percent is not none %}{{ item.percent|round|int }}%{% else %}Not graded{% endif %}
           {% if item.letter %} · {{ item.letter }}{% endif %}
         </span>

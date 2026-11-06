@@ -10,6 +10,7 @@ from ps_internet.parse import (
     current_quarter_code,
     current_term,
     latest_quarter,
+    quarter_code_for_date,
     scores_term,
     missing_from_query,
     parse_courses,
@@ -139,6 +140,9 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(current_quarter_code([dated, course], date(2026, 11, 6)), "Q2")
         self.assertEqual(assignment_window(dated), (date(2026, 9, 1), date(2027, 6, 1)))
         self.assertEqual(scores_term(dated).store_code, "Y1")
+        self.assertEqual(quarter_code_for_date(dated, date(2026, 9, 15)), "Q1")
+        self.assertEqual(quarter_code_for_date(dated, date(2026, 11, 6)), "Q2")
+        self.assertEqual(quarter_code_for_date(dated, date(2026, 8, 20)), "Q1")
         quarter_only = Course(
             "2",
             "English",
