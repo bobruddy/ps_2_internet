@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from ps_internet.status import (
     assignment_rows,
@@ -8,7 +8,9 @@ from ps_internet.status import (
     format_local,
     grade_band,
     grades_allow_internet,
+    in_grace,
     is_problem,
+    public_problem_rows,
     quarter_grades,
     restore_after_override,
     rules_allow_internet,
@@ -25,6 +27,49 @@ class StatusTests(unittest.TestCase):
         self.assertFalse(is_problem({"missing": False, "percent": 80, "exempt": False}, 80))
         self.assertFalse(is_problem({"missing": False, "percent": None, "exempt": False}, 80))
         self.assertFalse(is_problem({"missing": True, "percent": 0, "exempt": True}, 80))
+
+    def test_five_business_days_still_covers_sunday_after_a_monday_due_date(self):
+        monday = "2026-11-02"
+        sunday = date(2026, 11, 8)
+        next_monday = date(2026, 11, 9)
+        self.assertTrue(in_grace(monday, sunday, 5))
+        self.assertFalse(in_grace(monday, next_monday, 5))
+        self.assertTrue(in_grace("2026-11-06", sunday, 5))
+        self.assertFalse(in_grace(monday, sunday, 0))
+        self.assertFalse(in_grace(None, sunday, 5))
+        row = [{"assignment_id": "1", "course": "History", "name": "Quiz", "due_date": monday, "missing": True, "percent": None, "exempt": False}]
+        self.assertEqual(unexcused_problems(row, set(), 80, grace_days=5, today=sunday), [])
+        self.assertEqual(
+            [item["assignment_id"] for item in unexcused_problems(row, set(), 80, grace_days=5, today=next_monday)],
+            ["1"],
+        )
+        shown = assignment_rows(row, set(), 80, grace_days=5, today=sunday)[0]
+        self.assertTrue(shown["in_grace"])
+        self.assertTrue(shown["counts"])
+        self.assertEqual(shown["band"], "red")
+
+    def test_the_public_list_keeps_grace_and_timed_excuses(self):
+        rows = [
+            {"assignment_id": "old", "course": "History", "name": "Old", "due_date": "2026-09-01", "missing": True, "percent": None, "exempt": False},
+            {"assignment_id": "new", "course": "History", "name": "New", "due_date": "2026-11-02", "missing": True, "percent": None, "exempt": False},
+            {"assignment_id": "held", "course": "Math", "name": "Quiz", "due_date": "2026-09-02", "missing": False, "percent": 70, "exempt": False},
+            {"assignment_id": "forever", "course": "French", "name": "Essay", "due_date": "2026-09-03", "missing": True, "percent": None, "exempt": False},
+            {"assignment_id": "fine", "course": "French", "name": "Drill", "due_date": "2026-11-01", "missing": False, "percent": 95, "exempt": False},
+        ]
+        shown = public_problem_rows(
+            rows,
+            {"held": "2026-11-09T20:00:00+00:00", "forever": None},
+            80,
+            grace_days=5,
+            today=date(2026, 11, 8),
+        )
+        by_id = {item["assignment_id"]: item for item in shown}
+        self.assertEqual(set(by_id), {"old", "new", "held"})
+        self.assertFalse(by_id["old"]["in_grace"])
+        self.assertTrue(by_id["new"]["in_grace"])
+        self.assertEqual(by_id["old"]["band"], "red")
+        self.assertEqual(by_id["new"]["band"], "red")
+        self.assertEqual(by_id["held"]["excuse_until"], "2026-11-09T20:00:00+00:00")
 
     def test_excuse_removes_the_assignment_from_the_count(self):
         rows = [

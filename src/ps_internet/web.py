@@ -18,22 +18,28 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from ps_internet.config import env, load_dotenv
 from ps_internet.db import (
+    active_excuses,
     display_timezone,
     excused_ids,
     get_meta,
     get_override,
+    get_student,
     list_assignments,
     list_rules,
+    list_students,
     set_excuse,
     set_meta,
     set_rule_scope,
+    student_by_token,
     threshold,
+    update_student,
 )
 from ps_internet.jobs import (
     apply_internet,
     clear_internet_override,
     enforce_grades,
     expire_override_if_needed,
+    expire_temporary_excuses,
     grade_sync,
     loop,
     refresh_rules,
@@ -44,6 +50,9 @@ from ps_internet.status import (
     assignment_rows,
     explain,
     format_local,
+    format_local_day,
+    local_today,
+    public_problem_rows,
     quarter_grades,
     rules_allow_internet,
     unexcused_problems,
@@ -80,13 +89,30 @@ def _stop_scheduler() -> None:
 
 @app.get("/", response_class=HTMLResponse)
 def status_page(request: Request):
+    return _private_page(request)
+
+
+@app.get("/s/{token}", response_class=HTMLResponse)
+def shared_status(request: Request, token: str):
+    student = student_by_token(token)
+    if student is None or not student["public_enabled"]:
+        return _private_page(request)
     expire_override_if_needed()
-    view = _status_view()
+    expire_temporary_excuses()
     return templates.TemplateResponse(
         request,
         "status.html",
-        {"request": request, "view": view, "sync_at": _local(get_meta("sync_at"))},
+        {
+            "request": request,
+            "view": _status_view(student["student_id"]),
+            "sync_at": _local(student.get("sync_at")),
+            "student_name": student["first_name"],
+        },
     )
+
+
+def _private_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(request, "private.html", {"request": request})
 
 
 @app.get("/admin/login", response_class=HTMLResponse)
@@ -124,99 +150,207 @@ def logout(request: Request, csrf: str = Form("")):
 def admin(request: Request):
     if not request.session.get("admin"):
         return RedirectResponse("/admin/login", status_code=303)
+    return templates.TemplateResponse(
+        request,
+        "students.html",
+        {**_admin_common(request), "students": list_students(present_only=True)},
+    )
+
+
+@app.get("/admin/students/{student_id}", response_class=HTMLResponse)
+def admin_student(request: Request, student_id: str):
+    student = _open_student(request, student_id)
     expire_override_if_needed()
-    cutoff = threshold()
-    assignments = list_assignments()
-    excused = excused_ids()
-    courses = json.loads(get_meta("courses_json", "[]") or "[]")
+    expire_temporary_excuses()
+    cutoff = threshold(student_id)
+    assignments = list_assignments(student_id)
+    excuses = active_excuses(student_id)
+    courses = json.loads(student["courses_json"] or "[]")
+    today = local_today(display_timezone())
+    grace = int(student.get("grace_days") or 0)
+    rows = assignment_rows(assignments, set(excuses), cutoff, grace_days=grace, today=today)
+    for row in rows:
+        until = excuses.get(row["assignment_id"])
+        row["excuse_until"] = _local(until) if until else ""
+        row["excuse_until_short"] = format_local_day(until) if until else ""
     return templates.TemplateResponse(
         request,
         "admin.html",
         {
             **_admin_common(request),
+            "student": student,
+            "base": f"/admin/students/{student_id}",
+            "public_url": _public_url(request, student),
             "threshold": cutoff,
-            "assignments": assignment_rows(assignments, excused, cutoff),
+            "assignments": rows,
             "quarters": quarter_grades(courses, {item["course"] for item in assignments}),
-            "override": get_override(),
-            "override_until": _local((get_override() or {}).get("until_at")),
-            "sync_at": _local(get_meta("sync_at")),
-            "sync_error": get_meta("sync_error", "") or "",
-            "student": get_meta("student_name", "") or "",
+            "override": get_override(student_id),
+            "override_until": _local((get_override(student_id) or {}).get("until_at")),
+            "sync_at": _local(student.get("sync_at")),
+            "sync_error": student.get("sync_error") or "",
         },
     )
 
 
-@app.get("/admin/settings", response_class=HTMLResponse)
-def admin_settings(request: Request):
-    if not request.session.get("admin"):
-        return RedirectResponse("/admin/login", status_code=303)
+@app.get("/admin/students/{student_id}/settings", response_class=HTMLResponse)
+def admin_settings(request: Request, student_id: str):
+    student = _open_student(request, student_id)
     return templates.TemplateResponse(
         request,
         "settings.html",
         {
             **_admin_common(request),
-            "threshold": threshold(),
-            "rules": list_rules(),
-            "rule_match": env("UNIFI_RULE_MATCH", ""),
-            "sync_at": _local(get_meta("sync_at")),
-            "sync_error": get_meta("sync_error", "") or "",
-            "rules_error": get_meta("rules_error", "") or "",
-            "rules_at": _local(get_meta("rules_refreshed_at")),
+            "student": student,
+            "base": f"/admin/students/{student_id}",
+            "threshold": threshold(student_id),
+            "rules": list_rules(student_id),
+            "rule_match": student["rule_prefix"],
+            "sync_at": _local(student.get("sync_at")),
+            "sync_error": student.get("sync_error") or "",
+            "rules_error": student.get("rules_error") or "",
+            "rules_at": _local(student.get("rules_refreshed_at")),
             "timezone": display_timezone(),
             "timezones": TIMEZONES,
         },
     )
 
 
-@app.post("/admin/excuse")
-def excuse(request: Request, assignment_id: str = Form(...), excused: str = Form(...), csrf: str = Form("")):
+@app.post("/admin/students/{student_id}/excuse")
+def excuse(
+    request: Request,
+    student_id: str,
+    assignment_id: str = Form(...),
+    choice: str = Form(""),
+    excused: str = Form(""),
+    days: str = Form(""),
+    csrf: str = Form(""),
+):
     _guard(request, csrf)
-    set_excuse(assignment_id, excused == "1")
+    _open_student(request, student_id)
+    try:
+        held, until = _save_excuse(student_id, assignment_id, choice, excused, days)
+    except ValueError as exc:
+        if _wants_json(request):
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        return _back_error(student_id, str(exc))
     if _wants_json(request):
         try:
-            enforce_grades()
+            enforce_grades(student_id)
         except Exception as exc:
             log.exception("grade rule failed")
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
-        return JSONResponse({"ok": True})
-    return _after_grade_change("Saved.")
+        shown = _local(until) if until else ""
+        return JSONResponse(
+            {"ok": True, "excused": held, "until": shown, "until_short": format_local_day(until) if until else ""}
+        )
+    return _after_grade_change(student_id, "Excuse saved." if held else "Excuse cleared.")
 
 
-@app.post("/admin/threshold")
-def save_threshold(request: Request, percent: str = Form(...), csrf: str = Form("")):
+def _save_excuse(
+    student_id: str,
+    assignment_id: str,
+    choice: str,
+    excused: str,
+    days: str,
+) -> tuple[bool, str | None]:
+    picked = choice.strip()
+    if not picked:
+        picked = days.strip()
+        if excused != "1":
+            picked = "clear"
+        elif not picked:
+            picked = "forever"
+    if picked == "clear":
+        set_excuse(student_id, assignment_id, False)
+        return False, None
+    if picked == "forever":
+        set_excuse(student_id, assignment_id, True)
+        return True, None
+    if not picked.isdigit():
+        raise ValueError("Pick 1 to 5 days, or Excuse for no end.")
+    until = set_excuse(student_id, assignment_id, True, days=int(picked))
+    return True, until
+
+
+@app.post("/admin/students/{student_id}/threshold")
+def save_threshold(request: Request, student_id: str, percent: str = Form(...), csrf: str = Form("")):
     _guard(request, csrf)
+    _open_student(request, student_id)
     try:
         value = float(percent)
     except ValueError:
-        return _back_error("Cutoff must be a number.")
+        return _back_error(student_id, "Cutoff must be a number.", settings=True)
     if value <= 0 or value > 100:
-        return _back_error("Cutoff must be between 1 and 100.")
-    set_meta("threshold_percent", str(value))
+        return _back_error(student_id, "Cutoff must be between 1 and 100.", settings=True)
+    update_student(student_id, threshold_percent=str(value))
     if _wants_json(request):
         try:
-            enforce_grades()
+            enforce_grades(student_id)
         except Exception as exc:
             log.exception("grade rule failed")
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
         return JSONResponse({"ok": True})
-    return _after_grade_change("Cutoff saved.")
+    return _after_grade_change(student_id, "Cutoff saved.", settings=True)
 
 
-@app.post("/admin/timezone")
-def save_timezone(request: Request, timezone_name: str = Form(""), csrf: str = Form("")):
+@app.post("/admin/students/{student_id}/grace")
+def save_grace(request: Request, student_id: str, days: str = Form("0"), csrf: str = Form("")):
     _guard(request, csrf)
+    _open_student(request, student_id)
+    try:
+        value = int(days)
+    except ValueError:
+        return _back_error(student_id, "Grace period must be a number of business days.", settings=True)
+    if value < 0 or value > 30:
+        return _back_error(student_id, "Grace period must be from 0 to 30 business days.", settings=True)
+    update_student(student_id, grace_days=value)
+    if _wants_json(request):
+        try:
+            enforce_grades(student_id)
+        except Exception as exc:
+            log.exception("grade rule failed")
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        return JSONResponse({"ok": True})
+    return _after_grade_change(student_id, "Grace period saved.", settings=True)
+
+
+@app.post("/admin/students/{student_id}/prefix")
+def save_prefix(request: Request, student_id: str, rule_prefix: str = Form(""), csrf: str = Form("")):
+    _guard(request, csrf)
+    _open_student(request, student_id)
+    update_student(student_id, rule_prefix=rule_prefix.strip())
+    if _wants_json(request):
+        return JSONResponse({"ok": True})
+    return _back(student_id, "QoS prefix saved.", settings=True)
+
+
+@app.post("/admin/students/{student_id}/public")
+def save_public(request: Request, student_id: str, public_enabled: str = Form(""), csrf: str = Form("")):
+    _guard(request, csrf)
+    _open_student(request, student_id)
+    update_student(student_id, public_enabled=public_enabled == "1")
+    if _wants_json(request):
+        return JSONResponse({"ok": True})
+    return _back(student_id, "Shared page updated.")
+
+
+@app.post("/admin/students/{student_id}/timezone")
+def save_timezone(request: Request, student_id: str, timezone_name: str = Form(""), csrf: str = Form("")):
+    _guard(request, csrf)
+    _open_student(request, student_id)
     allowed = {key for key, _label in TIMEZONES}
     if timezone_name not in allowed:
-        return _back_error("Pick a time zone from the list.")
+        return _back_error(student_id, "Pick a time zone from the list.", settings=True)
     set_meta("display_timezone", timezone_name)
     if _wants_json(request):
         return JSONResponse({"ok": True})
-    return _back("Time zone saved.")
+    return _back(student_id, "Time zone saved.", settings=True)
 
 
-@app.post("/admin/rules")
+@app.post("/admin/students/{student_id}/rules")
 def save_rule(
     request: Request,
+    student_id: str,
     policy_id: str = Form(...),
     when_internet: str = Form(...),
     csrf: str = Form(""),
@@ -224,76 +358,88 @@ def save_rule(
     use_override: str = Form(""),
 ):
     _guard(request, csrf)
+    _open_student(request, student_id)
     try:
-        set_rule_scope(policy_id, use_rules == "1", use_override == "1", when_internet)
+        set_rule_scope(student_id, policy_id, use_rules == "1", use_override == "1", when_internet)
     except (KeyError, ValueError):
         if _wants_json(request):
             return JSONResponse({"ok": False, "error": "That rule could not be updated."}, status_code=400)
-        return _back_error("That rule could not be updated.")
+        return _back_error(student_id, "That rule could not be updated.", settings=True)
     if _wants_json(request):
         return JSONResponse({"ok": True})
-    return _back("Rule saved.")
+    return _back(student_id, "Rule saved.", settings=True)
 
 
-@app.post("/admin/rules/refresh")
-def rules_refresh(request: Request, csrf: str = Form("")):
+@app.post("/admin/students/{student_id}/rules/refresh")
+def rules_refresh(request: Request, student_id: str, csrf: str = Form("")):
     _guard(request, csrf)
+    _open_student(request, student_id)
     try:
-        refresh_rules()
+        refresh_rules(student_id)
     except UnifiError as exc:
-        return _back_error(str(exc))
+        return _back_error(student_id, str(exc), settings=True)
     except Exception as exc:
         log.exception("rule refresh failed")
-        return _back_error(str(exc))
-    found = len(list_rules())
+        return _back_error(student_id, str(exc), settings=True)
+    found = len(list_rules(student_id))
     discovered = int(get_meta("rules_discovered_count", "0") or "0")
     if discovered:
         notice = f"Discovered {discovered} new rule{'s' if discovered != 1 else ''}. {found} on the gateway match."
     else:
         notice = f"No new rules. {found} already known."
-    return _back(notice)
+    return _back(student_id, notice, settings=True)
 
 
 @app.post("/admin/sync")
-def sync_now(request: Request, csrf: str = Form("")):
+@app.post("/admin/students/{student_id}/sync")
+def sync_now(request: Request, student_id: str | None = None, csrf: str = Form("")):
     _guard(request, csrf)
+    if student_id is not None:
+        _open_student(request, student_id)
     try:
         grade_sync()
     except Exception as exc:
         log.exception("manual sync failed")
-        return _back_error(str(exc))
-    return _back("Grades refreshed.")
+        if student_id is None:
+            return RedirectResponse(f"/admin?error={quote(str(exc))}", status_code=303)
+        return _back_error(student_id, str(exc))
+    if student_id is None:
+        return RedirectResponse(f"/admin?notice={quote('Students refreshed.')}", status_code=303)
+    return _back(student_id, "Grades refreshed.")
 
 
-@app.post("/admin/override")
+@app.post("/admin/students/{student_id}/override")
 def override(
     request: Request,
+    student_id: str,
     internet: str = Form(...),
     minutes: int = Form(...),
     csrf: str = Form(""),
 ):
     _guard(request, csrf)
+    _open_student(request, student_id)
     if internet not in {"on", "off"}:
-        return _back_error("Choose on or off.")
+        return _back_error(student_id, "Choose on or off.")
     try:
-        apply_internet(internet == "on", minutes)
+        apply_internet(student_id, internet == "on", minutes)
     except (UnifiError, ValueError) as exc:
-        return _back_error(str(exc))
+        return _back_error(student_id, str(exc))
     except Exception as exc:
         log.exception("override failed")
-        return _back_error(str(exc))
-    return _back("Override applied.")
+        return _back_error(student_id, str(exc))
+    return _back(student_id, "Override applied.")
 
 
-@app.post("/admin/override/clear")
-def override_clear(request: Request, csrf: str = Form("")):
+@app.post("/admin/students/{student_id}/override/clear")
+def override_clear(request: Request, student_id: str, csrf: str = Form("")):
     _guard(request, csrf)
+    _open_student(request, student_id)
     try:
-        clear_internet_override()
+        clear_internet_override(student_id)
     except Exception as exc:
         log.exception("clear override failed")
-        return _back_error(str(exc))
-    return _back("Override cleared and the previous rule states restored.")
+        return _back_error(student_id, str(exc))
+    return _back(student_id, "Override cleared and the previous rule states restored.")
 
 
 def _admin_common(request: Request) -> dict:
@@ -305,26 +451,59 @@ def _admin_common(request: Request) -> dict:
     }
 
 
-def _status_view() -> dict:
-    cutoff = threshold()
-    assignments = list_assignments()
-    problems = unexcused_problems(assignments, excused_ids(), cutoff)
-    rules = list_rules()
+def _status_view(student_id: str) -> dict:
+    student = get_student(student_id) or {}
+    cutoff = threshold(student_id)
+    assignments = list_assignments(student_id)
+    grace = int(student.get("grace_days") or 0)
+    problems = unexcused_problems(
+        assignments,
+        excused_ids(student_id),
+        cutoff,
+        grace_days=grace,
+        today=local_today(display_timezone()),
+    )
+    rules = list_rules(student_id)
     internet_on = rules_allow_internet(rules)
     view = explain(
         configured=internet_on is not None,
         internet_on=internet_on,
-        override=get_override(),
+        override=get_override(student_id),
         problems=problems,
         now=datetime.now(timezone.utc),
         zone=display_timezone(),
     )
     view["quarters"] = quarter_grades(
-        json.loads(get_meta("courses_json", "[]") or "[]"),
+        json.loads(student.get("courses_json") or "[]"),
         {item["course"] for item in assignments},
     )
     view["threshold"] = cutoff
+    view["grace_days"] = grace
+    listed = public_problem_rows(
+        assignments,
+        active_excuses(student_id),
+        cutoff,
+        grace_days=grace,
+        today=local_today(display_timezone()),
+    )
+    for item in listed:
+        item["excuse_until"] = format_local_day(item["excuse_until"]) if item["excuse_until"] else ""
+    view["listed"] = listed
     return view
+
+
+def _open_student(request: Request, student_id: str) -> dict:
+    if not request.session.get("admin"):
+        raise _Redirect("/admin/login")
+    student = get_student(student_id)
+    if student is None:
+        raise _Redirect("/admin?error=That+student+is+not+in+the+list")
+    return student
+
+
+def _public_url(request: Request, student: dict) -> str:
+    root = str(request.base_url).rstrip("/")
+    return f"{root}/s/{student['public_token']}"
 
 
 def _csrf(request: Request) -> str:
@@ -361,25 +540,32 @@ def _wants_json(request: Request) -> bool:
     return "application/json" in request.headers.get("accept", "")
 
 
-def _after_grade_change(notice: str) -> RedirectResponse:
+def _after_grade_change(student_id: str, notice: str, settings: bool = False) -> RedirectResponse:
     try:
-        applied = enforce_grades()
+        applied = enforce_grades(student_id)
     except UnifiError as exc:
-        return _back_error(str(exc))
+        return _back_error(student_id, str(exc), settings=settings)
     except Exception as exc:
         log.exception("grade rule failed")
-        return _back_error(str(exc))
+        return _back_error(student_id, str(exc), settings=settings)
     if not applied:
-        return _back(notice + " No QoS rules are in scope, so internet was not changed.")
-    return _back(notice)
+        return _back(student_id, notice + " No QoS rules are in scope, so internet was not changed.", settings=settings)
+    return _back(student_id, notice, settings=settings)
 
 
-def _back(notice: str) -> RedirectResponse:
-    return RedirectResponse(f"/admin?notice={quote(notice)}", status_code=303)
+def _student_path(student_id: str, settings: bool = False) -> str:
+    path = f"/admin/students/{student_id}"
+    if settings:
+        path += "/settings"
+    return path
 
 
-def _back_error(message: str) -> RedirectResponse:
-    return RedirectResponse(f"/admin?error={quote(message)}", status_code=303)
+def _back(student_id: str, notice: str, settings: bool = False) -> RedirectResponse:
+    return RedirectResponse(f"{_student_path(student_id, settings)}?notice={quote(notice)}", status_code=303)
+
+
+def _back_error(student_id: str, message: str, settings: bool = False) -> RedirectResponse:
+    return RedirectResponse(f"{_student_path(student_id, settings)}?error={quote(message)}", status_code=303)
 
 
 def _local(value: str | None) -> str:

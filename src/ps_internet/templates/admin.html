@@ -1,13 +1,15 @@
 {% extends "base.html" %}
 {% block title %}Admin{% endblock %}
 {% block nav %}
-<a href="/admin/settings">Settings</a>
+<a href="/admin">Students</a>
+<a href="{{ base }}/settings">Settings</a>
 <form method="post" action="/admin/logout" class="inline">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <button class="link" type="submit">Sign out</button>
 </form>
 {% endblock %}
 {% block body %}
+<div class="student-stage" style="view-transition-name: s{{ student.student_id }}">
 {% if notice %}<p class="notice">{{ notice }}</p>{% endif %}
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
 
@@ -19,7 +21,7 @@
     {% endif %}
   </div>
   <p class="muted">Changes every rule marked Override, then puts those back when the time is up. A rule that is also rule based returns to what the grades call for.</p>
-  <form method="post" action="/admin/override" class="override-form">
+  <form method="post" action="{{ base }}/override" class="override-form">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <fieldset class="choice">
       <legend class="sr">Internet</legend>
@@ -42,7 +44,7 @@
     <button type="submit">Apply</button>
   </form>
   {% if override.active %}
-  <form method="post" action="/admin/override/clear">
+  <form method="post" action="{{ base }}/override/clear">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <button type="submit" class="secondary">Clear and restore</button>
   </form>
@@ -51,8 +53,8 @@
 
 <section class="card">
   <div class="section-head">
-    <h1>Admin{% if student %} · {{ student }}{% endif %}</h1>
-    <form method="post" action="/admin/sync">
+    <h1>{{ student.first_name }}</h1>
+    <form method="post" action="{{ base }}/sync">
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <button type="submit" class="secondary">Check PowerSchool now</button>
     </form>
@@ -65,13 +67,14 @@
 <section class="card">
   <div class="section-head">
     <h2>Assignments</h2>
-    <button type="button" id="only-counts" class="secondary" aria-pressed="false">Hide passing work</button>
+    <button type="button" id="only-counts" class="secondary is-on" aria-pressed="true">Hide passing work</button>
   </div>
   <p class="muted">Newest first. Click a quarter card to show one class. Hide passing work hides scores of {{ threshold|int }}% or higher, and work that is not graded yet. Missing assignments and scores under {{ threshold|int }}% stay.</p>
+  <p class="muted">Excuse keeps an assignment out with no end. 1–5 days keeps it out until that time, then it counts again unless PowerSchool shows it is no longer missing or under the cutoff. A lighter red is still inside the grace period and does not affect internet.</p>
   <p id="assignments-empty" hidden>Nothing in this view.</p>
-  <ul class="assignments" id="assignments">
+  <ul class="assignments quiet" id="assignments">
     {% for item in assignments %}
-    <li class="assignment grade-{{ item.band or 'none' }}" data-course="{{ item.course }}" data-counts="{{ '1' if item.counts else '0' }}" data-ungraded="{{ '1' if (not item.missing and item.percent is none) else '0' }}">
+    <li class="assignment grade-{{ item.band or 'none' }}{% if item.in_grace %} in-grace{% endif %}" data-course="{{ item.course }}" data-counts="{{ '1' if item.counts else '0' }}" data-ungraded="{{ '1' if (not item.missing and item.percent is none) else '0' }}">
       <div class="item-copy">
         <span class="course">{{ item.course }}</span>
         <span class="name">{{ item.name }}</span>
@@ -83,16 +86,35 @@
         </span>
       </div>
       {% if item.counts %}
-      <form method="post" action="/admin/excuse" data-live="excuse">
+      <form method="post" action="{{ base }}/excuse" data-live="excuse">
         <input type="hidden" name="csrf" value="{{ csrf }}">
         <input type="hidden" name="assignment_id" value="{{ item.assignment_id }}">
-        <input type="hidden" name="excused" value="{{ '0' if item.excused else '1' }}">
-        <button type="submit" class="excuse{% if item.excused %} is-on{% endif %}" aria-pressed="{{ 'true' if item.excused else 'false' }}">Excuse</button>
+        <button type="submit" name="choice" value="{{ 'clear' if item.excused and not item.excuse_until else 'forever' }}" class="excuse{% if item.excused and not item.excuse_until %} is-on{% endif %}" data-choice="forever" aria-pressed="{{ 'true' if item.excused and not item.excuse_until else 'false' }}">Excuse</button>
+        <button type="submit" name="choice" value="1" class="excuse day" data-choice="1" aria-label="1 day">1d</button>
+        <button type="submit" name="choice" value="2" class="excuse day" data-choice="2" aria-label="2 days">2d</button>
+        <button type="submit" name="choice" value="3" class="excuse day" data-choice="3" aria-label="3 days">3d</button>
+        <button type="submit" name="choice" value="4" class="excuse day" data-choice="4" aria-label="4 days">4d</button>
+        <button type="submit" name="choice" value="5" class="excuse day" data-choice="5" aria-label="5 days">5d</button>
+        {% if item.excuse_until %}
+        <button type="submit" name="choice" value="clear" class="excuse is-on until" data-choice="clear" title="Until {{ item.excuse_until }}. Click to clear.">{{ item.excuse_until_short }}</button>
+        {% endif %}
       </form>
       {% endif %}
     </li>
     {% endfor %}
   </ul>
 </section>
+
+<section class="card">
+  <h2>Shared page</h2>
+  <p class="muted">Off until you turn it on. The link is only for this student. Click it to copy, then send it.</p>
+  <form method="post" action="{{ base }}/public" data-live="setting">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="check"><input type="checkbox" name="public_enabled" value="1" {% if student.public_enabled %}checked{% endif %}> Show grades on the private link</label>
+    <noscript><button type="submit">Save</button></noscript>
+  </form>
+  <button type="button" class="copy-link" data-copy="{{ public_url }}">{{ public_url }}</button>
+</section>
+</div>
 {% endblock %}
 {% block scripts %}<script src="/static/app.js"></script>{% endblock %}

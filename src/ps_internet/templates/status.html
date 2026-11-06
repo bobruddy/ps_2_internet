@@ -2,27 +2,30 @@
 {% block title %}Internet status{% endblock %}
 {% block body %}
 <section class="status status-{{ view.state }}">
-  <p class="eyebrow">Right now</p>
+  <p class="eyebrow">{% if student_name %}{{ student_name }} · right now{% else %}Right now{% endif %}</p>
   <h1>{{ view.headline }}</h1>
   {% if view.why %}<p class="why">{{ view.why }}</p>{% endif %}
 </section>
 
 {% with quarters=view.quarters %}{% include "quarters.html" %}{% endwith %}
 
-{% if view.show_problems %}
+{% if view.listed %}
 <section class="card">
   <h2>Assignments to fix</h2>
-  <p class="muted">Missing work, or a score under {{ view.threshold|int }}%. Excused assignments are left out.{% if view.state == 'on' and view.why %} They stay listed while a parent override has internet on.{% endif %}</p>
-  <ul class="problems">
-    {% for item in view.problems %}
-    <li>
-      <span class="course">{{ item.course }}</span>
-      <span class="name">{{ item.name }}</span>
-      <span class="meta">
-        {% if item.due_date %}Due {{ item.due_date }} · {% endif %}
-        {% if item.store_code and item.store_code.upper().startswith('Q') %}{{ item.store_code }} · {% endif %}
-        {% if item.missing %}Missing{% elif item.percent is not none %}{{ item.percent|round|int }}%{% endif %}
-      </span>
+  <p class="muted">Missing work, or a score under {{ view.threshold|int }}%. Permanently excused work is left out. A lighter red is still inside the grace period and does not turn internet off.</p>
+  <ul class="assignments">
+    {% for item in view.listed %}
+    <li class="assignment grade-{{ item.band or 'none' }}{% if item.in_grace %} in-grace{% endif %}">
+      <div class="item-copy">
+        <span class="course">{{ item.course }}</span>
+        <span class="name">{{ item.name }}</span>
+        <span class="meta">
+          {% if item.due_date %}Due {{ item.due_date }} · {% endif %}
+          {% if item.store_code and item.store_code.upper().startswith('Q') %}{{ item.store_code }} · {% endif %}
+          {% if item.missing %}Missing{% elif item.percent is not none %}{{ item.percent|round|int }}%{% endif %}
+          {% if item.excuse_until %} · Excused until {{ item.excuse_until }}{% endif %}
+        </span>
+      </div>
     </li>
     {% endfor %}
   </ul>

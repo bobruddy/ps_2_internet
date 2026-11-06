@@ -33,22 +33,30 @@ async function postForm(form) {
   return data;
 }
 
-function paintExcuse(form) {
-  const flag = form.querySelector('[name="excused"]');
-  const button = form.querySelector("button");
-  const on = flag.value === "0";
-  button.classList.toggle("is-on", on);
-  button.setAttribute("aria-pressed", on ? "true" : "false");
-}
-
-function moveExcuse(form) {
-  const flag = form.querySelector('[name="excused"]');
-  flag.value = flag.value === "1" ? "0" : "1";
-  paintExcuse(form);
+function paintExcuse(form, data) {
+  const forever = form.querySelector('button[data-choice="forever"]');
+  const held = Boolean(data.excused);
+  const temporary = Boolean(data.until);
+  forever.classList.toggle("is-on", held && !temporary);
+  forever.setAttribute("aria-pressed", held && !temporary ? "true" : "false");
+  let clear = form.querySelector('button[data-choice="clear"]');
+  if (temporary) {
+    if (!clear) {
+      clear = document.createElement("button");
+      clear.type = "submit";
+      clear.className = "excuse is-on until";
+      clear.dataset.choice = "clear";
+      form.appendChild(clear);
+    }
+    clear.textContent = data.until_short || data.until;
+    clear.title = "Until " + data.until + ". Click to clear.";
+  } else if (clear) {
+    clear.remove();
+  }
 }
 
 let courseFilter = "";
-let worriesOnly = false;
+let worriesOnly = true;
 
 function courseName(node) {
   const label = node.querySelector(".course");
@@ -81,16 +89,31 @@ function applyAssignmentFilters() {
 document.querySelectorAll("form[data-live='excuse']").forEach((form) => {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const button = form.querySelector("button");
-    button.disabled = true;
+    const button = event.submitter || form.querySelector("button");
+    let choice = button.dataset.choice || button.value || "forever";
+    if (choice === "forever" && button.classList.contains("is-on")) choice = "clear";
+    let field = form.querySelector('input[name="choice"]');
+    if (!field) {
+      field = document.createElement("input");
+      field.type = "hidden";
+      field.name = "choice";
+      form.appendChild(field);
+    }
+    field.value = choice;
+    const controls = form.querySelectorAll("button");
+    controls.forEach((item) => {
+      item.disabled = true;
+    });
     try {
-      await postForm(form);
-      moveExcuse(form);
+      const saved = await postForm(form);
+      paintExcuse(form, saved);
       flash("Saved");
     } catch (error) {
       flash(error.message, true);
     } finally {
-      button.disabled = false;
+      controls.forEach((item) => {
+        item.disabled = false;
+      });
     }
   });
 });
@@ -144,7 +167,49 @@ document.querySelectorAll("form[data-live='rule']").forEach((form) => {
   });
 });
 
+function copyWithCommand(text) {
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.left = "-9999px";
+  document.body.appendChild(area);
+  area.select();
+  const ok = document.execCommand("copy");
+  area.remove();
+  if (!ok) {
+    throw new Error("copy failed");
+  }
+}
+
+async function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch (error) {
+      copyWithCommand(text);
+      return;
+    }
+  }
+  copyWithCommand(text);
+}
+
+document.querySelectorAll(".copy-link").forEach((button) => {
+  button.addEventListener("click", async () => {
+    const text = (button.dataset.copy || button.textContent || "").trim();
+    try {
+      await copyText(text);
+      flash("Copied");
+    } catch (error) {
+      flash("Could not copy", true);
+    }
+  });
+});
+
 document.querySelectorAll("form:not([data-live])").forEach(rememberScroll);
+
+applyAssignmentFilters();
 
 const savedY = sessionStorage.getItem("scroll-y");
 if (savedY) {

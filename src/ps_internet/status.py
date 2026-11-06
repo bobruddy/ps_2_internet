@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 DEFAULT_TIMEZONE = "America/New_York"
@@ -37,8 +37,43 @@ def is_problem(assignment: dict, threshold: float) -> bool:
     return float(percent) < threshold
 
 
-def assignment_rows(assignments: list[dict], excused_ids: set[str], threshold: float) -> list[dict]:
+def business_days_since(due: date, today: date) -> int:
+    """Weekdays after the due date, through today. The due date itself does not count."""
+    if today <= due:
+        return 0
+    count = 0
+    day = due + timedelta(days=1)
+    while day <= today:
+        if day.weekday() < 5:
+            count += 1
+        day += timedelta(days=1)
+    return count
+
+
+def in_grace(due_date: str | None, today: date, grace_days: int) -> bool:
+    """True while fewer than grace_days weekdays have passed since the due date."""
+    if grace_days <= 0 or not due_date:
+        return False
+    try:
+        due = date.fromisoformat(str(due_date)[:10])
+    except ValueError:
+        return False
+    return business_days_since(due, today) < grace_days
+
+
+def local_today(zone_name: str | None = None) -> date:
+    return datetime.now(zone_for(zone_name)).date()
+
+
+def assignment_rows(
+    assignments: list[dict],
+    excused_ids: set[str],
+    threshold: float,
+    grace_days: int = 0,
+    today: date | None = None,
+) -> list[dict]:
     """Every assignment, newest due date first. A blank date stays at the bottom."""
+    current = today or date.today()
     rows = []
     for item in assignments:
         percent = item.get("percent")
@@ -55,6 +90,7 @@ def assignment_rows(assignments: list[dict], excused_ids: set[str], threshold: f
                 **item,
                 "band": band,
                 "counts": counts,
+                "in_grace": counts and in_grace(item.get("due_date"), current, grace_days),
                 "excused": item["assignment_id"] in excused_ids,
             }
         )
@@ -104,15 +140,55 @@ def quarter_grades(courses: list[dict], with_assignments: set[str] | None = None
     return rows
 
 
+def public_problem_rows(
+    assignments: list[dict],
+    excuses: dict[str, str | None],
+    threshold: float,
+    grace_days: int = 0,
+    today: date | None = None,
+) -> list[dict]:
+    """Problems to show a student. A permanent excuse is hidden. Grace and a timed excuse stay."""
+    current = today or date.today()
+    rows = []
+    for item in assignments:
+        if not is_problem(item, threshold):
+            continue
+        if item["assignment_id"] in excuses and not excuses[item["assignment_id"]]:
+            continue
+        percent = item.get("percent")
+        number = None if percent is None else float(percent)
+        band = "red" if item.get("missing") else grade_band(number)
+        rows.append(
+            {
+                **item,
+                "band": band,
+                "in_grace": in_grace(item.get("due_date"), current, grace_days),
+                "excuse_until": excuses.get(item["assignment_id"]) or "",
+            }
+        )
+    rows.sort(key=lambda item: (item.get("course") or "", item.get("name") or ""))
+    rows.sort(key=lambda item: item.get("due_date") or "0000-00-00", reverse=True)
+    return rows
+
+
 def grades_allow_internet(problems: list[dict]) -> bool:
     """Internet follows assignments only. Quarter grades are display."""
     return not problems
 
 
-def unexcused_problems(assignments: list[dict], excused_ids: set[str], threshold: float) -> list[dict]:
+def unexcused_problems(
+    assignments: list[dict],
+    excused_ids: set[str],
+    threshold: float,
+    grace_days: int = 0,
+    today: date | None = None,
+) -> list[dict]:
+    current = today or date.today()
     problems = []
     for assignment in assignments:
         if assignment["assignment_id"] in excused_ids:
+            continue
+        if in_grace(assignment.get("due_date"), current, grace_days):
             continue
         if is_problem(assignment, threshold):
             problems.append(assignment)
@@ -220,6 +296,15 @@ def zone_for(name: str | None) -> ZoneInfo:
     if wanted not in {key for key, _label in TIMEZONES}:
         wanted = DEFAULT_TIMEZONE
     return ZoneInfo(wanted)
+
+
+def format_local_day(value: str | None, zone_name: str | None = None) -> str:
+    if not value:
+        return ""
+    moment = datetime.fromisoformat(value)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=ZoneInfo("UTC"))
+    return moment.astimezone(zone_for(zone_name)).strftime("%b %-d")
 
 
 def format_local(value: str | None, zone_name: str | None = None) -> str:

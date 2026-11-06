@@ -1,27 +1,43 @@
 {% extends "base.html" %}
 {% block title %}Settings{% endblock %}
 {% block nav %}
-<a href="/admin">Admin</a>
+<a href="/admin">Students</a>
+<a href="{{ base }}">{{ student.first_name }}</a>
 <form method="post" action="/admin/logout" class="inline">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <button class="link" type="submit">Sign out</button>
 </form>
 {% endblock %}
 {% block body %}
+<div class="student-stage" style="view-transition-name: s{{ student.student_id }}">
 {% if notice %}<p class="notice">{{ notice }}</p>{% endif %}
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
 
 <section class="card">
-  <h1>Settings</h1>
+  <h1>Settings · {{ student.first_name }}</h1>
   <p class="muted">These stay put. A change saves on its own.</p>
-  <form method="post" action="/admin/threshold" class="setting" data-live="setting">
+  <form method="post" action="{{ base }}/prefix" class="setting" data-live="setting">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="prefix">QoS rule prefix</label>
+    <input id="prefix" name="rule_prefix" value="{{ student.rule_prefix }}" autocomplete="off" spellcheck="false">
+    <span class="meta">Only rules whose names start with this are used for {{ student.first_name }}. Pause and resume only.</span>
+    <noscript><button type="submit">Save prefix</button></noscript>
+  </form>
+  <form method="post" action="{{ base }}/threshold" class="setting" data-live="setting">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label for="percent">Cutoff</label>
     <input id="percent" name="percent" type="number" min="1" max="100" step="1" inputmode="numeric" value="{{ threshold|int }}" required>
     <span class="meta">A score under this counts against internet. Missing work always counts.</span>
     <noscript><button type="submit">Save cutoff</button></noscript>
   </form>
-  <form method="post" action="/admin/timezone" class="setting" data-live="setting">
+  <form method="post" action="{{ base }}/grace" class="setting" data-live="setting">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="grace">Grace period</label>
+    <input id="grace" name="days" type="number" min="0" max="30" step="1" inputmode="numeric" value="{{ student.grace_days }}">
+    <span class="meta">Business days after the due date before a bad assignment counts. Weekends are skipped. 5 means a Monday assignment is still inside grace on Sunday, and it counts starting the next Monday. 0 counts it right away.</span>
+    <noscript><button type="submit">Save grace period</button></noscript>
+  </form>
+  <form method="post" action="{{ base }}/timezone" class="setting" data-live="setting">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label for="timezone">Time zone</label>
     <select id="timezone" name="timezone_name">
@@ -29,6 +45,7 @@
       <option value="{{ value }}" {% if value == timezone %}selected{% endif %}>{{ label }}</option>
       {% endfor %}
     </select>
+    <span class="meta">Clocks use this zone for every student.</span>
     <noscript><button type="submit">Save time zone</button></noscript>
   </form>
   <p class="muted">Last grade check: {{ sync_at or "not yet" }}.{% if sync_error %} {{ sync_error }}{% endif %}</p>
@@ -38,9 +55,9 @@
   <div class="section-head">
     <h2>QoS rules</h2>
   </div>
-  <p class="muted">Rules whose names start with “{{ rule_match }}”. A change saves as you make it. Rule based follows grades. Override is the timed control. A rule can be either or both. Resume or pause is the internet-on position.</p>
+  <p class="muted">{% if rule_match %}Rules whose names start with “{{ rule_match }}”.{% else %}Set a QoS rule prefix above before discovering rules.{% endif %} A change saves as you make it. Rule based follows grades. Override is the timed control. A rule can be either or both. Resume or pause is the internet-on position.</p>
   <p class="muted">Last rule check: {{ rules_at or "not yet" }}.{% if rules_error %} {{ rules_error }}{% endif %}</p>
-  <form method="post" action="/admin/rules/refresh">
+  <form method="post" action="{{ base }}/rules/refresh">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <button type="submit" class="secondary">Discover new rules</button>
   </form>
@@ -48,7 +65,7 @@
   <ul class="rules">
     {% for rule in rules %}
     <li class="{% if not rule.present %}gone{% endif %}">
-      <form method="post" action="/admin/rules" data-live="rule">
+      <form method="post" action="{{ base }}/rules" data-live="rule">
         <input type="hidden" name="csrf" value="{{ csrf }}">
         <input type="hidden" name="policy_id" value="{{ rule.policy_id }}">
         <div class="rule-head">
@@ -72,8 +89,9 @@
     {% endfor %}
   </ul>
   {% else %}
-  <p>No matching rules yet. Discover new rules after the {{ rule_match }} rules are on the gateway.</p>
+  <p>No matching rules yet.{% if rule_match %} Discover new rules after the {{ rule_match }} rules are on the gateway.{% else %} Set a prefix, then discover rules.{% endif %}</p>
   {% endif %}
 </section>
+</div>
 {% endblock %}
 {% block scripts %}<script src="/static/app.js"></script>{% endblock %}
