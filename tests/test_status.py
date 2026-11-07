@@ -8,6 +8,7 @@ from ps_internet.status import (
     format_local,
     grade_band,
     grades_allow_internet,
+    grace_ends_on,
     in_grace,
     is_problem,
     public_problem_rows,
@@ -47,6 +48,12 @@ class StatusTests(unittest.TestCase):
         self.assertTrue(shown["in_grace"])
         self.assertTrue(shown["counts"])
         self.assertEqual(shown["band"], "red")
+        self.assertEqual(grace_ends_on(monday, 5), next_monday)
+        self.assertEqual(shown["grace_until"], "Nov 9")
+        self.assertIsNone(grace_ends_on(monday, 0))
+        self.assertIsNone(grace_ends_on(None, 5))
+        fallen = assignment_rows(row, set(), 80, grace_days=5, today=next_monday)[0]
+        self.assertEqual(fallen["grace_until"], "")
 
     def test_the_public_list_keeps_grace_and_timed_excuses(self):
         rows = [
@@ -67,6 +74,8 @@ class StatusTests(unittest.TestCase):
         self.assertEqual(set(by_id), {"old", "new", "held"})
         self.assertFalse(by_id["old"]["in_grace"])
         self.assertTrue(by_id["new"]["in_grace"])
+        self.assertEqual(by_id["new"]["grace_until"], "Nov 9")
+        self.assertEqual(by_id["old"]["grace_until"], "")
         self.assertEqual(by_id["old"]["band"], "red")
         self.assertEqual(by_id["new"]["band"], "red")
         self.assertEqual(by_id["held"]["excuse_until"], "2026-11-09T20:00:00+00:00")

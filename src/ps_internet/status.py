@@ -61,6 +61,29 @@ def in_grace(due_date: str | None, today: date, grace_days: int) -> bool:
     return business_days_since(due, today) < grace_days
 
 
+def grace_ends_on(due_date: str | None, grace_days: int) -> date | None:
+    """The day the assignment starts counting. The due date itself does not count."""
+    if grace_days <= 0 or not due_date:
+        return None
+    try:
+        due = date.fromisoformat(str(due_date)[:10])
+    except ValueError:
+        return None
+    found = 0
+    day = due
+    while found < grace_days:
+        day += timedelta(days=1)
+        if day.weekday() < 5:
+            found += 1
+    return day
+
+
+def format_day(day: date | None) -> str:
+    if day is None:
+        return ""
+    return day.strftime("%b %-d")
+
+
 def local_today(zone_name: str | None = None) -> date:
     return datetime.now(zone_for(zone_name)).date()
 
@@ -79,6 +102,7 @@ def assignment_rows(
         percent = item.get("percent")
         number = None if percent is None else float(percent)
         counts = is_problem(item, threshold)
+        covered = counts and in_grace(item.get("due_date"), current, grace_days)
         if item.get("exempt"):
             band = None
         elif item.get("missing"):
@@ -90,7 +114,8 @@ def assignment_rows(
                 **item,
                 "band": band,
                 "counts": counts,
-                "in_grace": counts and in_grace(item.get("due_date"), current, grace_days),
+                "in_grace": covered,
+                "grace_until": format_day(grace_ends_on(item.get("due_date"), grace_days)) if covered else "",
                 "excused": item["assignment_id"] in excused_ids,
             }
         )
@@ -158,11 +183,13 @@ def public_problem_rows(
         percent = item.get("percent")
         number = None if percent is None else float(percent)
         band = "red" if item.get("missing") else grade_band(number)
+        covered = in_grace(item.get("due_date"), current, grace_days)
         rows.append(
             {
                 **item,
                 "band": band,
-                "in_grace": in_grace(item.get("due_date"), current, grace_days),
+                "in_grace": covered,
+                "grace_until": format_day(grace_ends_on(item.get("due_date"), grace_days)) if covered else "",
                 "excuse_until": excuses.get(item["assignment_id"]) or "",
             }
         )

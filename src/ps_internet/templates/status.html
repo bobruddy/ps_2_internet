@@ -23,6 +23,7 @@
           {% if item.due_date %}Due {{ item.due_date }} · {% endif %}
           {% if item.store_code and item.store_code.upper().startswith('Q') %}{{ item.store_code }} · {% endif %}
           {% if item.missing %}Missing{% elif item.percent is not none %}{{ item.percent|round|int }}%{% endif %}
+          {% if item.grace_until %} · Grace ends {{ item.grace_until }}{% endif %}
           {% if item.excuse_until %} · Excused until {{ item.excuse_until }}{% endif %}
         </span>
       </div>

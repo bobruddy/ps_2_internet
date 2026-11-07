@@ -215,6 +215,17 @@ button.excuse.is-on, button.secondary.is-on {
   color: white;
   border-color: var(--on);
 }
+.grace-until {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  line-height: 1;
+  white-space: nowrap;
+}
 .rules li {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

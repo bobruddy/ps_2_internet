@@ -98,6 +98,9 @@
         {% if item.excuse_until %}
         <button type="submit" name="choice" value="clear" class="excuse is-on until" data-choice="clear" title="Until {{ item.excuse_until }}. Click to clear.">{{ item.excuse_until_short }}</button>
         {% endif %}
+        {% if item.grace_until %}
+        <span class="grace-until" title="Grace ends {{ item.grace_until }}. It counts starting that day.">Grace {{ item.grace_until }}</span>
+        {% endif %}
       </form>
       {% endif %}
     </li>
