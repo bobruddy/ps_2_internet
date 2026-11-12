@@ -279,7 +279,9 @@ def _refresh_rules(student_id: str) -> list[dict]:
     student = get_student(student_id)
     if student is None:
         return []
-    known = {rule["policy_id"] for rule in list_rules(student_id)}
+    known = list_rules(student_id)
+    known_ids = {rule["policy_id"] for rule in known}
+    known_names = {rule["name"] for rule in known}
     needle = (student["rule_prefix"] or "").strip()
     if not needle:
         update_student(student_id, rules_error="Set a QoS rule prefix for this student.")
@@ -288,7 +290,11 @@ def _refresh_rules(student_id: str) -> list[dict]:
         found = client.matching(needle)
     observe_rules(student_id, found)
     rules = list_rules(student_id)
-    discovered = [rule for rule in rules if rule["policy_id"] not in known and rule["present"]]
+    discovered = [
+        rule
+        for rule in rules
+        if rule["present"] and rule["policy_id"] not in known_ids and rule["name"] not in known_names
+    ]
     set_meta("rules_discovered_count", str(len(discovered)))
     update_student(student_id, rules_refreshed_at=now(), rules_error="")
     return rules

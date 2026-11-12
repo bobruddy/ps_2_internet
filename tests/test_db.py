@@ -75,6 +75,67 @@ class RuleUseTests(unittest.TestCase):
         self.assertEqual(rule["when_internet"], "disable")
         self.assertFalse(rule["enabled"])
 
+    def test_a_new_gateway_id_keeps_the_rule_with_the_same_name(self):
+        ensure_student("ada", "Ada")
+        observe_rules(
+            "ada",
+            [{"id": "old", "name": "student_uptime_morning", "enabled": True, "description": "07:00–09:00"}],
+        )
+        set_rule_scope("ada", "old", True, False, "disable")
+        observe_rules(
+            "ada",
+            [{"id": "new", "name": "student_uptime_morning", "enabled": False, "description": "08:00–10:00"}],
+        )
+        rules = list_rules("ada")
+        self.assertEqual([rule["policy_id"] for rule in rules], ["new"])
+        rule = rules[0]
+        self.assertTrue(rule["use_rules"])
+        self.assertFalse(rule["use_override"])
+        self.assertEqual(rule["when_internet"], "disable")
+        self.assertTrue(rule["present"])
+        self.assertFalse(rule["enabled"])
+        self.assertEqual(rule["description"], "08:00–10:00")
+
+    def test_a_copied_rule_row_is_folded_back_onto_the_saved_name(self):
+        ensure_student("ada", "Ada")
+        observe_rules(
+            "ada",
+            [{"id": "old", "name": "student_uptime_morning", "enabled": False, "description": "old"}],
+        )
+        set_rule_scope("ada", "old", True, False, "enable")
+        with connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO rules (
+                  student_id, policy_id, name, description, action, enabled, in_scope,
+                  use_rules, use_override, when_internet, present, updated_at
+                )
+                VALUES ('ada', 'new', 'student_uptime_morning', 'new', '', 1, 0, 0, 0, 'enable', 1, 't')
+                """
+            )
+        observe_rules(
+            "ada",
+            [{"id": "new", "name": "student_uptime_morning", "enabled": True, "description": "new"}],
+        )
+        rules = list_rules("ada")
+        self.assertEqual([rule["policy_id"] for rule in rules], ["new"])
+        self.assertTrue(rules[0]["use_rules"])
+        self.assertFalse(rules[0]["use_override"])
+        self.assertTrue(rules[0]["present"])
+
+    def test_a_different_name_stays_a_different_rule(self):
+        ensure_student("ada", "Ada")
+        observe_rules("ada", [{"id": "old", "name": "student_uptime_morning", "enabled": True, "description": ""}])
+        set_rule_scope("ada", "old", True, False, "enable")
+        observe_rules("ada", [{"id": "evening", "name": "student_uptime_evening", "enabled": True, "description": ""}])
+        rows = {rule["name"]: rule for rule in list_rules("ada")}
+        self.assertEqual(rows["student_uptime_morning"]["policy_id"], "old")
+        self.assertFalse(rows["student_uptime_morning"]["present"])
+        self.assertTrue(rows["student_uptime_morning"]["use_rules"])
+        self.assertEqual(rows["student_uptime_evening"]["policy_id"], "evening")
+        self.assertTrue(rows["student_uptime_evening"]["present"])
+        self.assertFalse(rows["student_uptime_evening"]["use_rules"])
+
     def test_a_day_excuse_ends_and_a_plain_excuse_does_not(self):
         ensure_student("ada", "Ada")
         set_excuse("ada", "kept", True)

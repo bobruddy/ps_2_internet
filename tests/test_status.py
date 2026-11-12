@@ -7,6 +7,7 @@ from ps_internet.status import (
     explain,
     format_local,
     grade_band,
+    points_label,
     grades_allow_internet,
     grace_ends_on,
     in_grace,
@@ -22,6 +23,19 @@ from ps_internet.status import (
 
 
 class StatusTests(unittest.TestCase):
+    def test_points_show_earned_out_of_the_total(self):
+        self.assertEqual(points_label(15, 20), "15/20")
+        self.assertEqual(points_label(0, 5), "0/5")
+        self.assertEqual(points_label(12.5, 20), "12.5/20")
+        self.assertEqual(points_label(None, 100), "100 pts")
+        self.assertEqual(points_label(None, None), "")
+        row = assignment_rows(
+            [{"assignment_id": "1", "course": "History", "name": "Test", "due_date": "2026-11-02", "missing": False, "percent": 75, "points": 15, "max_points": 20, "exempt": False}],
+            set(),
+            80,
+        )[0]
+        self.assertEqual(row["points_label"], "15/20")
+
     def test_problem_is_missing_or_under_cutoff(self):
         self.assertTrue(is_problem({"missing": True, "percent": None, "exempt": False}, 80))
         self.assertTrue(is_problem({"missing": False, "percent": 79.9, "exempt": False}, 80))

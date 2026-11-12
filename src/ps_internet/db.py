@@ -610,35 +610,131 @@ def clear_expired_excuses() -> list[str]:
 
 
 def observe_rules(student_id: str, rules: list[dict]) -> None:
+    """Remember rules by name. A new gateway id for the same name keeps the saved choices."""
     stamped = now()
+    incoming = [rule for rule in rules if str(rule.get("id") or "") and str(rule.get("name") or "")]
+    incoming_ids = {str(rule["id"]) for rule in incoming}
     with connect() as conn:
-        conn.execute("UPDATE rules SET present = 0 WHERE student_id = ?", (student_id,))
-        for rule in rules:
+        stored = conn.execute("SELECT * FROM rules WHERE student_id = ?", (student_id,)).fetchall()
+        by_name: dict[str, list[sqlite3.Row]] = {}
+        for row in stored:
+            by_name.setdefault(row["name"], []).append(row)
+        claimed: set[str] = set()
+        for rule in incoming:
+            new_id = str(rule["id"])
+            named = [row for row in by_name.get(str(rule["name"]), []) if row["policy_id"] not in claimed]
+            current = next((row for row in named if row["policy_id"] == new_id), None)
+            stale = [row for row in named if row["policy_id"] != new_id and row["policy_id"] not in incoming_ids]
+            if current is not None and stale:
+                keeper = _saved_rule(stale)
+                _delete_rule(conn, student_id, current["policy_id"])
+                claimed.add(current["policy_id"])
+                _retarget_rule(conn, student_id, keeper["policy_id"], new_id, rule, stamped)
+                claimed.add(keeper["policy_id"])
+            elif current is not None:
+                _refresh_rule(conn, student_id, new_id, rule, stamped)
+                claimed.add(current["policy_id"])
+            elif stale:
+                keeper = _saved_rule(stale)
+                _retarget_rule(conn, student_id, keeper["policy_id"], new_id, rule, stamped)
+                claimed.add(keeper["policy_id"])
+            else:
+                _insert_rule(conn, student_id, rule, stamped)
+        if incoming_ids:
+            marks = ",".join("?" for _ in incoming_ids)
             conn.execute(
-                """
-                INSERT INTO rules (
-                  student_id, policy_id, name, description, action, enabled, in_scope,
-                  when_internet, present, updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, 0, 'enable', 1, ?)
-                ON CONFLICT(student_id, policy_id) DO UPDATE SET
-                  name = excluded.name,
-                  description = excluded.description,
-                  action = excluded.action,
-                  enabled = excluded.enabled,
-                  present = 1,
-                  updated_at = excluded.updated_at
-                """,
-                (
-                    student_id,
-                    rule["id"],
-                    rule["name"],
-                    rule.get("description") or "",
-                    rule.get("action") or "",
-                    1 if rule.get("enabled") else 0,
-                    stamped,
-                ),
+                f"UPDATE rules SET present = 0 WHERE student_id = ? AND policy_id NOT IN ({marks})",
+                (student_id, *incoming_ids),
             )
+        else:
+            conn.execute("UPDATE rules SET present = 0 WHERE student_id = ?", (student_id,))
+
+
+def _saved_rule(rows: list[sqlite3.Row]) -> sqlite3.Row:
+    def rank(row: sqlite3.Row) -> tuple:
+        saved = 1 if row["use_rules"] or row["use_override"] else 0
+        return (saved, row["updated_at"] or "")
+
+    return max(rows, key=rank)
+
+
+def _rule_fields(rule: dict, stamped: str) -> tuple:
+    return (
+        str(rule["name"]),
+        rule.get("description") or "",
+        rule.get("action") or "",
+        1 if rule.get("enabled") else 0,
+        stamped,
+    )
+
+
+def _refresh_rule(conn: sqlite3.Connection, student_id: str, policy_id: str, rule: dict, stamped: str) -> None:
+    conn.execute(
+        """
+        UPDATE rules
+        SET name = ?, description = ?, action = ?, enabled = ?, present = 1, updated_at = ?
+        WHERE student_id = ? AND policy_id = ?
+        """,
+        (*_rule_fields(rule, stamped), student_id, policy_id),
+    )
+
+
+def _retarget_rule(
+    conn: sqlite3.Connection,
+    student_id: str,
+    old_id: str,
+    new_id: str,
+    rule: dict,
+    stamped: str,
+) -> None:
+    conn.execute(
+        """
+        UPDATE rules
+        SET policy_id = ?, name = ?, description = ?, action = ?, enabled = ?, present = 1, updated_at = ?
+        WHERE student_id = ? AND policy_id = ?
+        """,
+        (new_id, *_rule_fields(rule, stamped), student_id, old_id),
+    )
+    _rewrite_restore_id(conn, student_id, old_id, new_id)
+
+
+def _rewrite_restore_id(conn: sqlite3.Connection, student_id: str, old_id: str, new_id: str) -> None:
+    row = conn.execute("SELECT restore_json FROM override WHERE student_id = ?", (student_id,)).fetchone()
+    if row is None or not row["restore_json"] or old_id == new_id:
+        return
+    restore = json.loads(row["restore_json"])
+    if old_id not in restore:
+        return
+    restore[new_id] = restore.pop(old_id)
+    conn.execute(
+        "UPDATE override SET restore_json = ? WHERE student_id = ?",
+        (json.dumps(restore), student_id),
+    )
+
+
+def _delete_rule(conn: sqlite3.Connection, student_id: str, policy_id: str) -> None:
+    conn.execute("DELETE FROM rules WHERE student_id = ? AND policy_id = ?", (student_id, policy_id))
+
+
+def _insert_rule(conn: sqlite3.Connection, student_id: str, rule: dict, stamped: str) -> None:
+    conn.execute(
+        """
+        INSERT INTO rules (
+          student_id, policy_id, name, description, action, enabled, in_scope,
+          when_internet, present, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, 0, 'enable', 1, ?)
+        """,
+        (
+            student_id,
+            str(rule["id"]),
+            str(rule["name"]),
+            rule.get("description") or "",
+            rule.get("action") or "",
+            1 if rule.get("enabled") else 0,
+            stamped,
+        ),
+    )
 
 
 def scope_uptime_rules_once(student_id: str) -> None:

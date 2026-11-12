@@ -116,12 +116,35 @@ def assignment_rows(
                 "counts": counts,
                 "in_grace": covered,
                 "grace_until": format_day(grace_ends_on(item.get("due_date"), grace_days)) if covered else "",
+                "points_label": points_label(item.get("points"), item.get("max_points")),
                 "excused": item["assignment_id"] in excused_ids,
             }
         )
     rows.sort(key=lambda item: (item.get("course") or "", item.get("name") or ""))
     rows.sort(key=lambda item: item.get("due_date") or "0000-00-00", reverse=True)
     return rows
+
+
+def points_label(points, max_points) -> str:
+    """Earned points out of the total, so a 5-point quiz is distinct from a 100-point test."""
+    earned = _points_number(points)
+    possible = _points_number(max_points)
+    if possible is None and earned is None:
+        return ""
+    if possible is None:
+        return earned or ""
+    if earned is None:
+        return f"{possible} pts"
+    return f"{earned}/{possible}"
+
+
+def _points_number(value) -> str | None:
+    if value is None or value == "":
+        return None
+    number = float(value)
+    if number.is_integer():
+        return str(int(number))
+    return f"{number:.2f}".rstrip("0").rstrip(".")
 
 
 def grade_band(percent: float | None) -> str | None:
@@ -190,6 +213,7 @@ def public_problem_rows(
                 "band": band,
                 "in_grace": covered,
                 "grace_until": format_day(grace_ends_on(item.get("due_date"), grace_days)) if covered else "",
+                "points_label": points_label(item.get("points"), item.get("max_points")),
                 "excuse_until": excuses.get(item["assignment_id"]) or "",
             }
         )
