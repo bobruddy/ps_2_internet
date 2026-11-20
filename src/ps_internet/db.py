@@ -79,6 +79,15 @@ CREATE TABLE IF NOT EXISTS override (
   restore_json TEXT,
   created_at TEXT
 );
+CREATE TABLE IF NOT EXISTS audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  at TEXT NOT NULL,
+  student_id TEXT NOT NULL DEFAULT '',
+  student_name TEXT NOT NULL DEFAULT '',
+  action TEXT NOT NULL,
+  client_ip TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS audit_id ON audit (id DESC);
 """
 
 LEGACY_STUDENT_ID = "legacy"
@@ -837,6 +846,46 @@ def set_override(student_id: str, internet_on: bool, until_at: str, restore: dic
             """,
             (student_id, 1 if internet_on else 0, until_at, json.dumps(restore), now()),
         )
+
+
+def add_audit(action: str, client_ip: str, student_id: str = "", student_name: str = "") -> None:
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO audit (at, student_id, student_name, action, client_ip)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (now(), student_id, student_name, action, client_ip or ""),
+        )
+        conn.execute(
+            """
+            DELETE FROM audit
+            WHERE id NOT IN (SELECT id FROM audit ORDER BY id DESC LIMIT 1000)
+            """
+        )
+
+
+def list_audit(limit: int = 200) -> list[dict]:
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT at, student_id, student_name, action, client_ip
+            FROM audit
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [
+        {
+            "at": row["at"],
+            "student_id": row["student_id"],
+            "student_name": row["student_name"],
+            "action": row["action"],
+            "client_ip": row["client_ip"],
+        }
+        for row in rows
+    ]
 
 
 def clear_override(student_id: str) -> dict:

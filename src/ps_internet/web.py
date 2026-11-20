@@ -19,12 +19,14 @@ from starlette.middleware.sessions import SessionMiddleware
 from ps_internet.config import env, load_dotenv
 from ps_internet.db import (
     active_excuses,
+    add_audit,
     display_timezone,
     excused_ids,
     get_meta,
     get_override,
     get_student,
     list_assignments,
+    list_audit,
     list_rules,
     list_students,
     set_excuse,
@@ -131,19 +133,47 @@ def login_form(request: Request):
 
 @app.post("/admin/login")
 def login(request: Request, password: str = Form(""), csrf: str = Form("")):
-    _check_csrf(request, csrf)
+    try:
+        _check_csrf(request, csrf)
+    except _Redirect:
+        _audit(request, "Sign-in failed")
+        raise
     expected = env("ADMIN_PASSWORD") or ""
     if not expected or not secrets.compare_digest(password, expected):
+        _audit(request, "Sign-in failed")
         return RedirectResponse("/admin/login?error=1", status_code=303)
     request.session["admin"] = True
+    _audit(request, "Signed in")
     return RedirectResponse("/admin", status_code=303)
 
 
 @app.post("/admin/logout")
 def logout(request: Request, csrf: str = Form("")):
     _check_csrf(request, csrf)
+    _audit(request, "Signed out")
     request.session.clear()
     return RedirectResponse("/", status_code=303)
+
+
+@app.get("/admin/audit", response_class=HTMLResponse)
+def audit_log(request: Request):
+    if not request.session.get("admin"):
+        return RedirectResponse("/admin/login", status_code=303)
+    zone = display_timezone()
+    rows = [
+        {
+            "at": format_local(row["at"], zone),
+            "student": row["student_name"],
+            "action": row["action"],
+            "client_ip": row["client_ip"],
+        }
+        for row in list_audit()
+    ]
+    return templates.TemplateResponse(
+        request,
+        "audit.html",
+        {**_admin_common(request), "rows": rows},
+    )
 
 
 @app.get("/admin", response_class=HTMLResponse)
@@ -226,13 +256,14 @@ def excuse(
     csrf: str = Form(""),
 ):
     _guard(request, csrf)
-    _open_student(request, student_id)
+    student = _open_student(request, student_id)
     try:
         held, until = _save_excuse(student_id, assignment_id, choice, excused, days)
     except ValueError as exc:
         if _wants_json(request):
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
         return _back_error(student_id, str(exc))
+    _audit(request, _excuse_action(student_id, assignment_id, held, until), student)
     if _wants_json(request):
         try:
             enforce_grades(student_id)
@@ -275,7 +306,7 @@ def _save_excuse(
 @app.post("/admin/students/{student_id}/threshold")
 def save_threshold(request: Request, student_id: str, percent: str = Form(...), csrf: str = Form("")):
     _guard(request, csrf)
-    _open_student(request, student_id)
+    student = _open_student(request, student_id)
     try:
         value = float(percent)
     except ValueError:
@@ -283,6 +314,8 @@ def save_threshold(request: Request, student_id: str, percent: str = Form(...), 
     if value <= 0 or value > 100:
         return _back_error(student_id, "Cutoff must be between 1 and 100.", settings=True)
     update_student(student_id, threshold_percent=str(value))
+    shown = int(value) if value == int(value) else value
+    _audit(request, f"Set the cutoff to {shown}%", student)
     if _wants_json(request):
         try:
             enforce_grades(student_id)
@@ -296,7 +329,7 @@ def save_threshold(request: Request, student_id: str, percent: str = Form(...), 
 @app.post("/admin/students/{student_id}/grace")
 def save_grace(request: Request, student_id: str, days: str = Form("0"), csrf: str = Form("")):
     _guard(request, csrf)
-    _open_student(request, student_id)
+    student = _open_student(request, student_id)
     try:
         value = int(days)
     except ValueError:
@@ -304,6 +337,12 @@ def save_grace(request: Request, student_id: str, days: str = Form("0"), csrf: s
     if value < 0 or value > 30:
         return _back_error(student_id, "Grace period must be from 0 to 30 business days.", settings=True)
     update_student(student_id, grace_days=value)
+    if value == 0:
+        grace_action = "Set the grace period so a bad assignment counts right away"
+    else:
+        unit = "business day" if value == 1 else "business days"
+        grace_action = f"Set the grace period to {value} {unit}"
+    _audit(request, grace_action, student)
     if _wants_json(request):
         try:
             enforce_grades(student_id)
@@ -317,8 +356,14 @@ def save_grace(request: Request, student_id: str, days: str = Form("0"), csrf: s
 @app.post("/admin/students/{student_id}/prefix")
 def save_prefix(request: Request, student_id: str, rule_prefix: str = Form(""), csrf: str = Form("")):
     _guard(request, csrf)
-    _open_student(request, student_id)
-    update_student(student_id, rule_prefix=rule_prefix.strip())
+    student = _open_student(request, student_id)
+    prefix = rule_prefix.strip()
+    update_student(student_id, rule_prefix=prefix)
+    if prefix:
+        prefix_action = f"Set the QoS prefix to {prefix}"
+    else:
+        prefix_action = "Cleared the QoS prefix"
+    _audit(request, prefix_action, student)
     if _wants_json(request):
         return JSONResponse({"ok": True})
     return _back(student_id, "QoS prefix saved.", settings=True)
@@ -327,8 +372,10 @@ def save_prefix(request: Request, student_id: str, rule_prefix: str = Form(""), 
 @app.post("/admin/students/{student_id}/public")
 def save_public(request: Request, student_id: str, public_enabled: str = Form(""), csrf: str = Form("")):
     _guard(request, csrf)
-    _open_student(request, student_id)
-    update_student(student_id, public_enabled=public_enabled == "1")
+    student = _open_student(request, student_id)
+    enabled = public_enabled == "1"
+    update_student(student_id, public_enabled=enabled)
+    _audit(request, "Turned the private link on" if enabled else "Turned the private link off", student)
     if _wants_json(request):
         return JSONResponse({"ok": True})
     return _back(student_id, "Shared page updated.")
@@ -337,11 +384,12 @@ def save_public(request: Request, student_id: str, public_enabled: str = Form(""
 @app.post("/admin/students/{student_id}/timezone")
 def save_timezone(request: Request, student_id: str, timezone_name: str = Form(""), csrf: str = Form("")):
     _guard(request, csrf)
-    _open_student(request, student_id)
-    allowed = {key for key, _label in TIMEZONES}
-    if timezone_name not in allowed:
+    student = _open_student(request, student_id)
+    labels = dict(TIMEZONES)
+    if timezone_name not in labels:
         return _back_error(student_id, "Pick a time zone from the list.", settings=True)
     set_meta("display_timezone", timezone_name)
+    _audit(request, f"Set the household time zone to {labels[timezone_name]}", student)
     if _wants_json(request):
         return JSONResponse({"ok": True})
     return _back(student_id, "Time zone saved.", settings=True)
@@ -358,13 +406,16 @@ def save_rule(
     use_override: str = Form(""),
 ):
     _guard(request, csrf)
-    _open_student(request, student_id)
+    student = _open_student(request, student_id)
+    follows_grades = use_rules == "1"
+    follows_override = use_override == "1"
     try:
-        set_rule_scope(student_id, policy_id, use_rules == "1", use_override == "1", when_internet)
+        set_rule_scope(student_id, policy_id, follows_grades, follows_override, when_internet)
     except (KeyError, ValueError):
         if _wants_json(request):
             return JSONResponse({"ok": False, "error": "That rule could not be updated."}, status_code=400)
         return _back_error(student_id, "That rule could not be updated.", settings=True)
+    _audit(request, _rule_action(student_id, policy_id, follows_grades, follows_override, when_internet), student)
     if _wants_json(request):
         return JSONResponse({"ok": True})
     return _back(student_id, "Rule saved.", settings=True)
@@ -373,14 +424,17 @@ def save_rule(
 @app.post("/admin/students/{student_id}/rules/refresh")
 def rules_refresh(request: Request, student_id: str, csrf: str = Form("")):
     _guard(request, csrf)
-    _open_student(request, student_id)
+    student = _open_student(request, student_id)
     try:
         refresh_rules(student_id)
     except UnifiError as exc:
+        _audit(request, "Gateway rule check failed", student)
         return _back_error(student_id, str(exc), settings=True)
     except Exception as exc:
         log.exception("rule refresh failed")
+        _audit(request, "Gateway rule check failed", student)
         return _back_error(student_id, str(exc), settings=True)
+    _audit(request, "Checked the gateway for new rules", student)
     found = len(list_rules(student_id))
     discovered = int(get_meta("rules_discovered_count", "0") or "0")
     if discovered:
@@ -394,15 +448,16 @@ def rules_refresh(request: Request, student_id: str, csrf: str = Form("")):
 @app.post("/admin/students/{student_id}/sync")
 def sync_now(request: Request, student_id: str | None = None, csrf: str = Form("")):
     _guard(request, csrf)
-    if student_id is not None:
-        _open_student(request, student_id)
+    student = _open_student(request, student_id) if student_id is not None else None
     try:
         grade_sync()
     except Exception as exc:
         log.exception("manual sync failed")
+        _audit(request, "PowerSchool check failed", student)
         if student_id is None:
             return RedirectResponse(f"/admin?error={quote(str(exc))}", status_code=303)
         return _back_error(student_id, str(exc))
+    _audit(request, "Checked PowerSchool", student)
     if student_id is None:
         return RedirectResponse(f"/admin?notice={quote('Students refreshed.')}", status_code=303)
     return _back(student_id, "Grades refreshed.")
@@ -417,28 +472,33 @@ def override(
     csrf: str = Form(""),
 ):
     _guard(request, csrf)
-    _open_student(request, student_id)
+    student = _open_student(request, student_id)
     if internet not in {"on", "off"}:
         return _back_error(student_id, "Choose on or off.")
     try:
         apply_internet(student_id, internet == "on", minutes)
     except (UnifiError, ValueError) as exc:
+        _audit(request, _override_action(internet, minutes, applied=False), student)
         return _back_error(student_id, str(exc))
     except Exception as exc:
         log.exception("override failed")
+        _audit(request, _override_action(internet, minutes, applied=False), student)
         return _back_error(student_id, str(exc))
+    _audit(request, _override_action(internet, minutes, applied=True), student)
     return _back(student_id, "Override applied.")
 
 
 @app.post("/admin/students/{student_id}/override/clear")
 def override_clear(request: Request, student_id: str, csrf: str = Form("")):
     _guard(request, csrf)
-    _open_student(request, student_id)
+    student = _open_student(request, student_id)
     try:
         clear_internet_override(student_id)
     except Exception as exc:
         log.exception("clear override failed")
+        _audit(request, "Tried to clear the internet override", student)
         return _back_error(student_id, str(exc))
+    _audit(request, "Cleared the internet override", student)
     return _back(student_id, "Override cleared and the previous rule states restored.")
 
 
@@ -570,3 +630,77 @@ def _back_error(student_id: str, message: str, settings: bool = False) -> Redire
 
 def _local(value: str | None) -> str:
     return format_local(value, display_timezone())
+
+
+def _client_ip(request: Request) -> str:
+    if request.client is None:
+        return ""
+    return request.client.host or ""
+
+
+def _audit(request: Request, action: str, student: dict | None = None) -> None:
+    add_audit(
+        action,
+        _client_ip(request),
+        student_id="" if student is None else student.get("student_id", ""),
+        student_name="" if student is None else student.get("first_name", ""),
+    )
+
+
+def _assignment_label(student_id: str, assignment_id: str) -> str:
+    for item in list_assignments(student_id):
+        if item["assignment_id"] == assignment_id:
+            return f"{item['course']} · {item['name']}"
+    return "an assignment"
+
+
+def _excuse_action(student_id: str, assignment_id: str, held: bool, until: str | None) -> str:
+    label = _assignment_label(student_id, assignment_id)
+    if not held:
+        return f"Cleared the excuse on {label}"
+    if until:
+        return f"Excused {label} until {_local(until)}"
+    return f"Excused {label} with no end"
+
+
+def _rule_action(
+    student_id: str,
+    policy_id: str,
+    follows_grades: bool,
+    follows_override: bool,
+    when_internet: str,
+) -> str:
+    name = "a rule"
+    for rule in list_rules(student_id):
+        if rule["policy_id"] == policy_id:
+            name = rule["name"]
+            break
+    if follows_grades and follows_override:
+        follows = "follows grades and the override"
+    elif follows_grades:
+        follows = "follows grades"
+    elif follows_override:
+        follows = "follows the override"
+    else:
+        follows = "is unused"
+    position = "Resume" if when_internet == "enable" else "Pause"
+    return f"Set {name} so it {follows}. {position} it when internet is allowed."
+
+
+_OVERRIDE_LENGTHS = {
+    30: "30 minutes",
+    60: "1 hour",
+    120: "2 hours",
+    240: "4 hours",
+    480: "8 hours",
+    1440: "24 hours",
+    4320: "3 days",
+    10080: "7 days",
+}
+
+
+def _override_action(internet: str, minutes: int, applied: bool) -> str:
+    length = _OVERRIDE_LENGTHS.get(minutes, f"{minutes} minutes")
+    state = "on" if internet == "on" else "off"
+    verb = "Turned" if applied else "Tried to turn"
+    return f"{verb} internet {state} for {length}"

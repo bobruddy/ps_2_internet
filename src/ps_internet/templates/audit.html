@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Activity{% endblock %}
+{% block nav %}
+<a href="/admin">Students</a>
+<form method="post" action="/admin/logout" class="inline">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <button class="link" type="submit">Sign out</button>
+</form>
+{% endblock %}
+{% block body %}
+<section class="card">
+  <h1>Activity</h1>
+  <p class="muted">Sign-ins and changes, newest first. The address is the computer that connected. Passwords are not recorded.</p>
+  {% if rows %}
+  <ul class="audit">
+    {% for row in rows %}
+    <li>
+      <span class="when">{{ row.at }}</span>
+      <span class="who">{% if row.student %}{{ row.student }}{% else %}—{% endif %}</span>
+      <span class="what">{{ row.action }}</span>
+      <span class="where">{{ row.client_ip or "unknown" }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>Nothing has been recorded yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

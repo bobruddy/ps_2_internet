@@ -390,6 +390,27 @@ button.grade.is-selected { box-shadow: inset 0 0 0 2px currentColor; }
 .grade .meta, .grade-none .course { color: inherit; }
 .grade-none .meta, .grade-none .course { color: var(--muted); }
 
+.audit {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+.audit li {
+  display: grid;
+  grid-template-columns: minmax(9.5rem, 12rem) minmax(4.5rem, 7rem) minmax(0, 1fr) auto;
+  gap: 4px 16px;
+  align-items: baseline;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.audit .when,
+.audit .who,
+.audit .where {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+.audit .where { font-variant-numeric: tabular-nums; }
+
 .toast {
   position: fixed;
   left: 50%;
@@ -418,6 +439,8 @@ button.grade.is-selected { box-shadow: inset 0 0 0 2px currentColor; }
 }
 
 @media (max-width: 640px) {
+  .audit li { grid-template-columns: 1fr auto; }
+  .audit .what { grid-column: 1 / -1; order: -1; }
   .assignment { grid-template-columns: 1fr; }
   form[data-live="excuse"] { justify-content: flex-start; max-width: none; }
   .override-form button, .toolbar button, .cutoff button { width: 100%; }

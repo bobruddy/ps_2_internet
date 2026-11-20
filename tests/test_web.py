@@ -13,6 +13,7 @@ from ps_internet.db import (
     ensure_student,
     excused_ids,
     get_student,
+    list_audit,
     list_rules,
     observe_rules,
     replace_assignments,
@@ -194,6 +195,47 @@ class AdminRuleChoiceTests(unittest.TestCase):
         )
         self.assertFalse(cleared.json()["excused"])
         self.assertEqual(excused_ids("ada"), set())
+
+    def test_a_change_shows_up_in_the_activity_log(self):
+        replace_assignments(
+            "ada",
+            [{"assignment_id": "a1", "course": "History", "name": "Outline", "due_date": "2026-11-02", "missing": True, "percent": None}],
+        )
+        page = self.client.get("/admin/students/ada")
+        token = page.text.split('name="csrf" value="', 1)[1].split('"', 1)[0]
+        saved = self.client.post(
+            "/admin/students/ada/excuse",
+            data={"csrf": token, "assignment_id": "a1", "choice": "forever"},
+            headers={"Accept": "application/json"},
+        )
+        self.assertTrue(saved.json()["ok"])
+        activity = self.client.get("/admin/audit")
+        self.assertEqual(activity.status_code, 200)
+        self.assertIn("Activity", activity.text)
+        self.assertIn("Ada", activity.text)
+        self.assertIn("Excused History · Outline with no end", activity.text)
+        self.assertIn("testclient", activity.text)
+        self.assertIn("Signed in", activity.text)
+        row = next(item for item in list_audit() if item["action"].startswith("Excused"))
+        self.assertEqual(row["student_name"], "Ada")
+        self.assertEqual(row["client_ip"], "testclient")
+        self.assertTrue(row["at"])
+
+    def test_a_failed_sign_in_records_the_address_and_not_the_password(self):
+        outsider = TestClient(app)
+        login = outsider.get("/admin/login")
+        token = login.text.split('name="csrf" value="', 1)[1].split('"', 1)[0]
+        guess = "super-secret-guess"
+        refused = outsider.post("/admin/login", data={"password": guess, "csrf": token})
+        self.assertIn("did not match", refused.text)
+        failed = [row for row in list_audit() if row["action"] == "Sign-in failed"]
+        self.assertTrue(failed)
+        self.assertEqual(failed[0]["client_ip"], "testclient")
+        self.assertEqual(failed[0]["student_name"], "")
+        stored = " ".join(row["action"] + row["student_name"] + row["client_ip"] for row in list_audit())
+        self.assertNotIn(guess, stored)
+        hidden = outsider.get("/admin/audit", follow_redirects=False)
+        self.assertEqual(hidden.status_code, 303)
 
 
 if __name__ == "__main__":
