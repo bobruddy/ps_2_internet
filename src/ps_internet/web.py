@@ -142,7 +142,7 @@ def login(request: Request, password: str = Form(""), csrf: str = Form("")):
     if not expected or not secrets.compare_digest(password, expected):
         _audit(request, "Sign-in failed")
         return RedirectResponse("/admin/login?error=1", status_code=303)
-    request.session["admin"] = True
+    _stamp_session(request)
     _audit(request, "Signed in")
     return RedirectResponse("/admin", status_code=303)
 
@@ -155,9 +155,18 @@ def logout(request: Request, csrf: str = Form("")):
     return RedirectResponse("/", status_code=303)
 
 
+@app.post("/admin/expire-sessions")
+def expire_sessions(request: Request, csrf: str = Form("")):
+    _guard(request, csrf)
+    set_meta("session_epoch", str(int(_session_epoch()) + 1))
+    _audit(request, "Expired every signed-in browser")
+    request.session.clear()
+    return RedirectResponse("/admin/login", status_code=303)
+
+
 @app.get("/admin/audit", response_class=HTMLResponse)
 def audit_log(request: Request):
-    if not request.session.get("admin"):
+    if not _admin_session(request):
         return RedirectResponse("/admin/login", status_code=303)
     zone = display_timezone()
     rows = [
@@ -178,7 +187,7 @@ def audit_log(request: Request):
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin(request: Request):
-    if not request.session.get("admin"):
+    if not _admin_session(request):
         return RedirectResponse("/admin/login", status_code=303)
     return templates.TemplateResponse(
         request,
@@ -553,7 +562,7 @@ def _status_view(student_id: str) -> dict:
 
 
 def _open_student(request: Request, student_id: str) -> dict:
-    if not request.session.get("admin"):
+    if not _admin_session(request):
         raise _Redirect("/admin/login")
     student = get_student(student_id)
     if student is None:
@@ -585,8 +594,26 @@ def _check_csrf(request: Request, token: str) -> None:
         raise _Redirect("/admin/login?error=1")
 
 
-def _guard(request: Request, token: str) -> None:
+def _session_epoch() -> str:
+    return get_meta("session_epoch", "0") or "0"
+
+
+def _stamp_session(request: Request) -> None:
+    request.session["admin"] = True
+    request.session["epoch"] = _session_epoch()
+
+
+def _admin_session(request: Request) -> bool:
     if not request.session.get("admin"):
+        return False
+    if request.session.get("epoch") != _session_epoch():
+        request.session.clear()
+        return False
+    return True
+
+
+def _guard(request: Request, token: str) -> None:
+    if not _admin_session(request):
         raise _Redirect("/admin/login")
     _check_csrf(request, token)
 

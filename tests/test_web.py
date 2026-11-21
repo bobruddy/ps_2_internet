@@ -237,6 +237,37 @@ class AdminRuleChoiceTests(unittest.TestCase):
         hidden = outsider.get("/admin/audit", follow_redirects=False)
         self.assertEqual(hidden.status_code, 303)
 
+    def test_expiring_cookies_signs_out_every_browser(self):
+        other = TestClient(app)
+        login = other.get("/admin/login")
+        token = login.text.split('name="csrf" value="', 1)[1].split('"', 1)[0]
+        signed_in = other.post("/admin/login", data={"password": "test", "csrf": token}, follow_redirects=False)
+        self.assertEqual(signed_in.status_code, 303)
+        self.assertEqual(other.get("/admin", follow_redirects=False).status_code, 200)
+
+        page = self.client.get("/admin/audit")
+        self.assertIn("Expire all cookies right now", page.text)
+        token = page.text.split('name="csrf" value="', 1)[1].split('"', 1)[0]
+        expired = self.client.post("/admin/expire-sessions", data={"csrf": token}, follow_redirects=False)
+        self.assertEqual(expired.status_code, 303)
+        self.assertEqual(expired.headers["location"], "/admin/login")
+
+        self.assertEqual(self.client.get("/admin", follow_redirects=False).status_code, 303)
+        self.assertEqual(other.get("/admin/students/ada", follow_redirects=False).status_code, 303)
+        blocked = other.post(
+            "/admin/students/ada/override",
+            data={"csrf": token, "internet": "on", "minutes": "30"},
+            follow_redirects=False,
+        )
+        self.assertEqual(blocked.status_code, 303)
+
+        login = self.client.get("/admin/login")
+        token = login.text.split('name="csrf" value="', 1)[1].split('"', 1)[0]
+        again = self.client.post("/admin/login", data={"password": "test", "csrf": token}, follow_redirects=False)
+        self.assertEqual(again.status_code, 303)
+        self.assertEqual(self.client.get("/admin/audit", follow_redirects=False).status_code, 200)
+        self.assertTrue(any(row["action"] == "Expired every signed-in browser" for row in list_audit()))
+
 
 if __name__ == "__main__":
     unittest.main()

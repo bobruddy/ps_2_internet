@@ -9,8 +9,14 @@
 {% endblock %}
 {% block body %}
 <section class="card">
-  <h1>Activity</h1>
-  <p class="muted">Sign-ins and changes, newest first. The address is the computer that connected. Passwords are not recorded.</p>
+  <div class="section-head">
+    <h1>Activity</h1>
+    <form method="post" action="/admin/expire-sessions">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit" class="secondary">Expire all cookies right now</button>
+    </form>
+  </div>
+  <p class="muted">Sign-ins and changes, newest first. The address is the computer that connected. Passwords are not recorded. Expiring cookies signs out every browser, including this one.</p>
   {% if rows %}
   <ul class="audit">
     {% for row in rows %}
