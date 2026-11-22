@@ -227,6 +227,7 @@ def admin_student(request: Request, student_id: str):
             "override_until": _local((get_override(student_id) or {}).get("until_at")),
             "sync_at": _local(student.get("sync_at")),
             "sync_error": student.get("sync_error") or "",
+            "view": _status_view(student_id),
         },
     )
 
@@ -280,8 +281,17 @@ def excuse(
             log.exception("grade rule failed")
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
         shown = _local(until) if until else ""
+        view = _status_view(student_id)
         return JSONResponse(
-            {"ok": True, "excused": held, "until": shown, "until_short": format_local_day(until) if until else ""}
+            {
+                "ok": True,
+                "excused": held,
+                "until": shown,
+                "until_short": format_local_day(until) if until else "",
+                "state": view["state"],
+                "headline": view["headline"],
+                "why": view["why"],
+            }
         )
     return _after_grade_change(student_id, "Excuse saved." if held else "Excuse cleared.")
 

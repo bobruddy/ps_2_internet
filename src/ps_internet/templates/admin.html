@@ -11,6 +11,11 @@
 {% endblock %}
 {% block body %}
 <div class="student-stage" style="view-transition-name: s{{ student.student_id }}">
+<section class="status status-{{ view.state }}">
+  <p class="eyebrow">{{ student.first_name }} · right now</p>
+  <h1>{{ view.headline }}</h1>
+  {% if view.why %}<p class="why">{{ view.why }}</p>{% endif %}
+</section>
 {% if notice %}<p class="notice">{{ notice }}</p>{% endif %}
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
 

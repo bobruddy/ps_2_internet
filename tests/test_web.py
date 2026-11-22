@@ -47,6 +47,8 @@ class AdminRuleChoiceTests(unittest.TestCase):
         detail = self.client.get("/admin/students/ada")
         self.assertIn("Assignments", detail.text)
         self.assertNotIn("QoS rules", detail.text)
+        self.assertIn("Ada · right now", detail.text)
+        self.assertIn("Internet is not being controlled from this page.", detail.text)
 
     def tearDown(self):
         if self._old_db is None:

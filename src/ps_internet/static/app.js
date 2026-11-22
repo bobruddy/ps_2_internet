@@ -33,6 +33,26 @@ async function postForm(form) {
   return data;
 }
 
+function paintStatus(data) {
+  const banner = document.querySelector(".status");
+  if (!banner || !data.state || !data.headline) return;
+  banner.classList.remove("status-on", "status-off", "status-unconfigured");
+  banner.classList.add("status-" + data.state);
+  const title = banner.querySelector("h1");
+  if (title) title.textContent = data.headline;
+  let why = banner.querySelector(".why");
+  if (data.why) {
+    if (!why) {
+      why = document.createElement("p");
+      why.className = "why";
+      banner.appendChild(why);
+    }
+    why.textContent = data.why;
+  } else if (why) {
+    why.remove();
+  }
+}
+
 function paintExcuse(form, data) {
   const forever = form.querySelector('button[data-choice="forever"]');
   const held = Boolean(data.excused);
@@ -107,6 +127,7 @@ document.querySelectorAll("form[data-live='excuse']").forEach((form) => {
     try {
       const saved = await postForm(form);
       paintExcuse(form, saved);
+      paintStatus(saved);
       flash("Saved");
     } catch (error) {
       flash(error.message, true);
