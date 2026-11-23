@@ -435,6 +435,13 @@ def save_rule(
             return JSONResponse({"ok": False, "error": "That rule could not be updated."}, status_code=400)
         return _back_error(student_id, "That rule could not be updated.", settings=True)
     _audit(request, _rule_action(student_id, policy_id, follows_grades, follows_override, when_internet), student)
+    try:
+        enforce_grades(student_id)
+    except Exception as exc:
+        log.exception("grade rule failed")
+        if _wants_json(request):
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        return _back_error(student_id, str(exc), settings=True)
     if _wants_json(request):
         return JSONResponse({"ok": True})
     return _back(student_id, "Rule saved.", settings=True)

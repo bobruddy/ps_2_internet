@@ -16,6 +16,7 @@ from ps_internet.status import (
     quarter_grades,
     restore_after_override,
     rules_allow_internet,
+    rules_in_position,
     rules_for_grades,
     rules_for_override,
     unexcused_problems,
@@ -118,6 +119,16 @@ class StatusTests(unittest.TestCase):
         rules[1]["enabled"] = True
         self.assertFalse(rules_allow_internet(rules))
         self.assertIsNone(rules_allow_internet([]))
+
+    def test_a_paused_limit_rule_is_not_already_off(self):
+        rules = [
+            {"use_rules": True, "present": True, "enabled": False, "when_internet": "enable"},
+            {"use_rules": True, "present": True, "enabled": False, "when_internet": "disable"},
+        ]
+        self.assertFalse(rules_allow_internet(rules))
+        self.assertFalse(rules_in_position(rules, False))
+        rules[1]["enabled"] = True
+        self.assertTrue(rules_in_position(rules, False))
 
     def test_a_rule_can_be_automatic_override_or_both(self):
         rules = [

@@ -274,11 +274,23 @@ def restore_after_override(restore: dict, rules: list[dict]) -> dict:
     return {policy_id: enabled for policy_id, enabled in restore.items() if policy_id not in automatic}
 
 
+def rules_in_position(rules: list[dict], internet_on: bool) -> bool:
+    """True when every grade rule is already in the position for this internet state."""
+    scoped = rules_for_grades(rules)
+    if not scoped:
+        return False
+    return all(
+        rule.get("enabled") is not None
+        and bool(rule["enabled"]) == desired_enabled(rule["when_internet"], internet_on)
+        for rule in scoped
+    )
+
+
 def rules_allow_internet(rules: list[dict]) -> bool | None:
     scoped = rules_for_grades(rules)
     if not scoped:
         return None
-    return all(bool(rule.get("enabled")) == desired_enabled(rule["when_internet"], True) for rule in scoped)
+    return rules_in_position(rules, True)
 
 
 def explain(

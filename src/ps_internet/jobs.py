@@ -51,7 +51,7 @@ from ps_internet.status import (
     grades_allow_internet,
     zone_for,
     restore_after_override,
-    rules_allow_internet,
+    rules_in_position,
     local_today,
     rules_for_grades,
     rules_for_override,
@@ -327,7 +327,7 @@ def _enforce_grades(student_id: str) -> bool:
     rules = rules_for_grades(list_rules(student_id), override_active=held)
     if not rules or not (student["rule_prefix"] or "").strip():
         return False
-    if rules_allow_internet(rules) is allow:
+    if rules_in_position(rules, allow):
         return True
     log.info("grade rule sets internet %s for %s", "on" if allow else "off", student_id)
     _write_rules(student_id, rules, allow)
