@@ -201,14 +201,10 @@ def _grade_sync() -> dict:
             except PowerSchoolError as exc:
                 update_student(student_id, sync_error=str(exc))
                 errors.append(f"{portal_student.first_name}: {exc}")
-                continue
-            total += count
-            errors.extend(course_errors)
-            try:
-                _enforce_grades(student_id)
-            except Exception as exc:
-                log.exception("grade rule failed")
-                update_student(student_id, rules_error=str(exc))
+            else:
+                total += count
+                errors.extend(course_errors)
+            _verify_managed_rules(student_id)
         mark_students_present(seen)
     return {"assignments": total, "errors": errors, "students": sorted(seen)}
 
@@ -308,6 +304,22 @@ def _override_active(student_id: str) -> bool:
     if until.tzinfo is None:
         until = until.replace(tzinfo=timezone.utc)
     return until > datetime.now(timezone.utc)
+
+
+def _verify_managed_rules(student_id: str) -> None:
+    """Read the gateway, then move rule-based rules to match the grades on file."""
+    if not env("UNIFI_API_KEY"):
+        return
+    try:
+        _refresh_rules(student_id)
+    except Exception as exc:
+        log.exception("unifi refresh failed")
+        update_student(student_id, rules_error=str(exc))
+    try:
+        _enforce_grades(student_id)
+    except Exception as exc:
+        log.exception("grade rule failed")
+        update_student(student_id, rules_error=str(exc))
 
 
 def _enforce_grades(student_id: str) -> bool:
